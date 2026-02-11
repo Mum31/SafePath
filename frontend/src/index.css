@@ -1,0 +1,11 @@
+/* Reset global - base minimal pour SafePath */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Force le thème clair (évite les conflits avec prefers-color-scheme) */
+:root {
+  color-scheme: light;
+}

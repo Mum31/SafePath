@@ -5,14 +5,15 @@ from rest_framework import status
 from django.http import JsonResponse
 from .models import UserPreferences, CalmZone, RouteRequest
 from .utils.data_aggregator import DataAggregator
-from .utils.data_sources import DataSourceManager, geocode_address
+from .utils.data_sources import DataSourceManager, geocode_address, geocode_search
 from .utils.routing import get_walking_route
 from ml_model.predict import predict_density, predict_density_grid, predict_density_by_zone, predict_density_grid_by_zone
 from .utils.zones_config import resolve_zone, list_zones_for_api
 import json
 import math
-from datetime import datetime
 import random
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 @api_view(['GET'])
 def test_api(request):
@@ -26,6 +27,7 @@ def test_api(request):
             'calm_zones': '/api/calm-zones/',
             'zones': '/api/zones/',
             'density_prediction': '/api/density-prediction/',
+            'geocode': '/api/geocode/',
             'test': '/api/test/',
             'health': '/api/health/'
         },
@@ -41,6 +43,22 @@ def health_check(request):
         'version': '1.0.0',
         'timestamp': datetime.now().isoformat()
     })
+
+
+@api_view(['GET'])
+def geocode_search_view(request):
+    """
+    Géocode une requête de recherche (lieu, adresse, POI).
+    GET ?q=Tour+Eiffel → { lat, lng, display_name }
+    """
+    q = (request.GET.get('q') or '').strip()
+    if not q:
+        return Response({'error': 'Paramètre q requis'}, status=status.HTTP_400_BAD_REQUEST)
+    result = geocode_search(q)
+    if not result:
+        return Response({'error': 'Lieu introuvable'}, status=status.HTTP_404_NOT_FOUND)
+    return Response(result)
+
 
 def _resolve_coordinates(location):
     """
@@ -84,13 +102,22 @@ class CalculateRouteView(APIView):
             user_id = request.data.get('user_id', 'anonymous')
             preferences = request.data.get('preferences', {})
             
-            # Géocodage si adresse fournie (rue, ville, code postal)
-            origin, err = _resolve_coordinates(origin_raw)
-            if err:
-                return Response({'error': f'Départ: {err}'}, status=status.HTTP_400_BAD_REQUEST)
-            destination, err = _resolve_coordinates(destination_raw)
-            if err:
-                return Response({'error': f'Destination: {err}'}, status=status.HTTP_400_BAD_REQUEST)
+            # Géocodage en parallèle si adresses fournies (réduit le temps total)
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                fut_orig = executor.submit(_resolve_coordinates, origin_raw)
+                fut_dest = executor.submit(_resolve_coordinates, destination_raw)
+                try:
+                    origin, err = fut_orig.result(timeout=6)
+                except Exception:
+                    origin, err = None, "timeout géocodage"
+                if err:
+                    return Response({'error': f'Départ: {err}'}, status=status.HTTP_400_BAD_REQUEST)
+                try:
+                    destination, err = fut_dest.result(timeout=6)
+                except Exception:
+                    destination, err = None, "timeout géocodage"
+                if err:
+                    return Response({'error': f'Destination: {err}'}, status=status.HTTP_400_BAD_REQUEST)
             
             # Récupère ou crée les préférences utilisateur
             user_prefs, _ = UserPreferences.objects.get_or_create(
@@ -108,18 +135,50 @@ class CalculateRouteView(APIView):
             # Agrégation des données open data (trafic, météo, flux piétons, événements)
             data_aggregator = DataAggregator()
             data_manager = DataSourceManager()
-            
-            # Récupération des données externes pour la zone (origin/destination sont maintenant des coords)
-            traffic_data = data_manager.get_traffic_data(origin)
-            weather_data = data_manager.get_weather_data(origin)
-            pedestrian_data = data_manager.get_pedestrian_flow_data(origin)
-            events_data = data_manager.get_events_data(origin)
-            
-            # Routage réel via OSRM (fallback sur chemin simulé si échec)
-            path, instructions, osrm_distance = get_walking_route(
-                origin['lng'], origin['lat'],
-                destination['lng'], destination['lat']
-            )
+
+            # OSRM + données externes en parallèle (réduit le temps total)
+            def _osrm():
+                return get_walking_route(
+                    origin['lng'], origin['lat'],
+                    destination['lng'], destination['lat']
+                )
+            def _traffic():
+                return data_manager.get_traffic_data(origin)
+            def _weather():
+                return data_manager.get_weather_data(origin)
+            def _pedestrian():
+                return data_manager.get_pedestrian_flow_data(origin)
+            def _events():
+                return data_manager.get_events_data(origin)
+
+            _timeout = 5
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                fut_osrm = executor.submit(_osrm)
+                fut_t = executor.submit(_traffic)
+                fut_w = executor.submit(_weather)
+                fut_p = executor.submit(_pedestrian)
+                fut_e = executor.submit(_events)
+                try:
+                    path, instructions, osrm_distance = fut_osrm.result(timeout=_timeout)
+                except Exception:
+                    path, instructions, osrm_distance = None, None, None
+                try:
+                    traffic_data = fut_t.result(timeout=_timeout)
+                except Exception:
+                    traffic_data = {'flow': 0.5, 'confidence': 0.0}
+                try:
+                    weather_data = fut_w.result(timeout=_timeout)
+                except Exception:
+                    weather_data = {'weather_factor': 1.0}
+                try:
+                    pedestrian_data = fut_p.result(timeout=_timeout)
+                except Exception:
+                    pedestrian_data = {'flow': 0.5, 'confidence': 0.5}
+                try:
+                    events_data = fut_e.result(timeout=_timeout)
+                except Exception:
+                    events_data = []
+
             routing_source = 'OSRM' if path is not None else 'simulated'
             if path is None:
                 path = self.generate_route_path(
@@ -127,25 +186,35 @@ class CalculateRouteView(APIView):
                     destination['lng'], destination['lat']
                 )
                 instructions = []
-            
-            # Densité agrégée depuis les sources open data
-            density_data = data_aggregator.get_density_for_path(path)
-            
-            # Facteur transport en commun : proximité métro/bus = +densité (cache par zone)
+
+            # Densité agrégée (4 points max pour rapidité)
+            density_data = data_aggregator.get_density_for_path(path, max_points=4)
+
+            # Facteur transport en commun : lookups en parallèle (cache par zone)
             if getattr(user_prefs, 'consider_public_transport', True):
                 transport_factor = getattr(user_prefs, 'transport_factor', 0.15) or 0.15
                 from django.core.cache import cache
-                for pt in density_data:
+
+                def _transit_for(pt):
                     key = f"transit:{round(pt['location']['lat'],3)}:{round(pt['location']['lng'],3)}"
                     stations = cache.get(key)
                     if stations is None:
                         stations = data_manager.get_transit_stations_near_point(
                             pt['location'], radius_m=150
                         )
-                        cache.set(key, stations, 300)  # 5 min
-                    if stations:
-                        pt['density'] = round(min(1.0, pt['density'] + transport_factor * len(stations)), 3)
-                        pt['near_transit'] = len(stations)
+                        cache.set(key, stations, 300)
+                    return pt, stations
+
+                with ThreadPoolExecutor(max_workers=len(density_data)) as exec_transit:
+                    futures = [exec_transit.submit(_transit_for, pt) for pt in density_data]
+                    for fut in futures:
+                        try:
+                            pt, stations = fut.result(timeout=6)
+                            if stations:
+                                pt['density'] = round(min(1.0, pt['density'] + transport_factor * len(stations)), 3)
+                                pt['near_transit'] = len(stations)
+                        except Exception:
+                            pass
             
             # Enrichissement avec prédiction ML par horaire (cartographie prédictive)
             target_hour = request.data.get('target_hour')
@@ -160,9 +229,9 @@ class CalculateRouteView(APIView):
             for i, pt in enumerate(density_data):
                 pred = predict_density(
                     pt['location']['lat'], pt['location']['lng'],
-                    target_datetime
+                    target_datetime,
+                    skip_realtime=True  # évite des appels API redondants (densité déjà agrégée)
                 )
-                # Fusion: agrégation réelle + prédiction horaire
                 pt['density'] = round((pt['density'] * 0.6 + pred['density'] * 0.4), 3)
                 pt['predicted_for_hour'] = pred.get('hour')
             
@@ -222,6 +291,8 @@ class CalculateRouteView(APIView):
                 'metadata': {
                     'algorithm': 'Stress-Aware Path Finder v2.0',
                     'routing': routing_source,
+                    'recommendation_type': 'calm_secure',
+                    'recommendation_summary': 'Trajet recommandé par SafePath pour limiter le stress et la foule (densité, zones calmes, préférences utilisateur).',
                     'timestamp': datetime.now().isoformat(),
                     'data_sources': [
                         'OSRM (routage piéton)',

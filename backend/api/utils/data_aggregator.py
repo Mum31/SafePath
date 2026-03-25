@@ -2,8 +2,11 @@
 Agrégateur de données open data pour SafePath.
 Combine trafic, météo, flux piétons et événements pour estimer la densité par point.
 """
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List
 from .data_sources import DataSourceManager
+
+_AGGREGATOR_SOURCE_TIMEOUT = 2
 
 
 class DataAggregator:
@@ -19,13 +22,57 @@ class DataAggregator:
     ) -> Dict:
         """
         Agrège trafic, météo, flux piétons, événements pour un point.
-        Retourne densité estimée 0-1 et métadonnées des sources.
+        Les 4 sources sont appelées en parallèle pour réduire le temps.
         """
         sources_used = []
         density_components = []
 
-        # 1. Trafic (proxy densité véhicules -> piétons aux carrefours)
-        traffic = self.data_manager.get_traffic_data(point)
+        def _traffic():
+            try:
+                return self.data_manager.get_traffic_data(point)
+            except Exception:
+                return {'flow': 0.5, 'confidence': 0.0}
+
+        def _weather():
+            try:
+                return self.data_manager.get_weather_data(point)
+            except Exception:
+                return {'weather_factor': 1.0}
+
+        def _pedestrian():
+            try:
+                return self.data_manager.get_pedestrian_flow_data(point)
+            except Exception:
+                return {'flow': 0.5, 'confidence': 0.5, 'source': 'default'}
+
+        def _events():
+            try:
+                return self.data_manager.get_events_data(point)
+            except Exception:
+                return []
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            fut_t = executor.submit(_traffic)
+            fut_w = executor.submit(_weather)
+            fut_p = executor.submit(_pedestrian)
+            fut_e = executor.submit(_events)
+            try:
+                traffic = fut_t.result(timeout=_AGGREGATOR_SOURCE_TIMEOUT)
+            except Exception:
+                traffic = {'flow': 0.5, 'confidence': 0.0}
+            try:
+                weather = fut_w.result(timeout=_AGGREGATOR_SOURCE_TIMEOUT)
+            except Exception:
+                weather = {'weather_factor': 1.0}
+            try:
+                pedestrian = fut_p.result(timeout=_AGGREGATOR_SOURCE_TIMEOUT)
+            except Exception:
+                pedestrian = {'flow': 0.5, 'confidence': 0.5, 'source': 'default'}
+            try:
+                events = fut_e.result(timeout=_AGGREGATOR_SOURCE_TIMEOUT)
+            except Exception:
+                events = []
+
         if traffic.get('confidence', 0) > 0:
             sources_used.append({
                 'name': 'TomTom Traffic',
@@ -37,19 +84,14 @@ class DataAggregator:
             sources_used.append({'name': 'TomTom Traffic', 'weight': 0, 'value': 0.5})
             density_components.append(0.1)
 
-        # 2. Météo (pluie = moins de monde)
-        weather = self.data_manager.get_weather_data(point)
         weather_factor = weather.get('weather_factor', 1.0)
         sources_used.append({
             'name': 'OpenWeather',
             'weight': 0.15,
             'value': weather_factor
         })
-        base_density = 0.4
-        density_components.append(0.15 * base_density * weather_factor)
+        density_components.append(0.15 * 0.4 * weather_factor)
 
-        # 3. Flux piétons (Open Data Paris ou estimation POI)
-        pedestrian = self.data_manager.get_pedestrian_flow_data(point)
         flow = pedestrian.get('flow', 0.5)
         conf = pedestrian.get('confidence', 0.5)
         sources_used.append({
@@ -59,9 +101,6 @@ class DataAggregator:
             'confidence': conf
         })
         density_components.append(0.45 * flow)
-
-        # 4. Événements (augmentent la densité)
-        events = self.data_manager.get_events_data(point)
         events_impact = min(0.3, len(events) * 0.05)
         if events:
             sources_used.append({
@@ -100,16 +139,15 @@ class DataAggregator:
         self,
         path: List[List[float]],
         interval_meters: int = 50,
-        max_points: int = 15
+        max_points: int = 6
     ) -> List[Dict]:
         """
         Calcule la densité agrégée pour des points échantillonnés du chemin.
-        Échantillonnage pour éviter 100+ appels API (TomTom, OpenWeather, etc. par point).
+        Échantillonnage pour limiter les appels API (max_points=6 pour garder le calcul rapide).
         path: [[lng, lat], ...]
         """
         if not path:
             return []
-        # Échantillonnage : max 15 points pour limiter les appels API
         n = len(path)
         if n <= max_points:
             indices = list(range(n))
@@ -119,15 +157,25 @@ class DataAggregator:
                 for i in range(max_points)
             ]
             indices = sorted(set(indices))
-        results = []
-        for i in indices:
-            coord = path[i]
+        def task(pos, path_idx):
+            coord = path[path_idx]
             point = {'lng': coord[0], 'lat': coord[1]}
             agg = self.get_aggregated_density_for_point(point)
-            results.append({
-                'location': {'lng': coord[0], 'lat': coord[1]},
-                'density': agg['density'],
-                'confidence': agg['confidence'],
-                'source': 'aggregated'
-            })
+            return pos, {'location': {'lng': coord[0], 'lat': coord[1]}, 'density': agg['density'], 'confidence': agg['confidence'], 'source': 'aggregated'}
+
+        results = [None] * len(indices)
+        with ThreadPoolExecutor(max_workers=len(indices)) as executor:
+            futures = [executor.submit(task, pos, idx) for pos, idx in enumerate(indices)]
+            for fut in futures:
+                try:
+                    pos, item = fut.result(timeout=_AGGREGATOR_SOURCE_TIMEOUT * 3)
+                    results[pos] = item
+                except Exception:
+                    pass
+        # Remplir les échecs par une densité par défaut
+        for pos in range(len(results)):
+            if results[pos] is None:
+                idx = indices[pos]
+                coord = path[idx]
+                results[pos] = {'location': {'lng': coord[0], 'lat': coord[1]}, 'density': 0.5, 'confidence': 0.0, 'source': 'aggregated'}
         return results

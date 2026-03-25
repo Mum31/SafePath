@@ -26,12 +26,14 @@ def _which_zone_for_point(lat: float, lng: float) -> Optional[str]:
 
 def predict_density(
     lat: float, lng: float,
-    target_datetime: Optional[datetime] = None
+    target_datetime: Optional[datetime] = None,
+    skip_realtime: bool = False
 ) -> Dict:
     """
     Prédit la densité pour un point à un horaire cible.
     Priorité : profil historique pour (zone, heure cible, jour) = "ce qu'il y aura à cette heure".
-    Ajustement optionnel avec données temps réel si l'horaire cible est proche de maintenant.
+    Ajustement optionnel avec données temps réel si l'horaire cible est proche de maintenant
+    (désactivé si skip_realtime=True pour éviter des appels redondants lors du calcul de trajet).
     """
     dt = target_datetime or datetime.now()
     hour = dt.hour
@@ -44,21 +46,22 @@ def predict_density(
     model_type = "predictive"
     confidence = 0.8
 
-    # 2) Ajustement temps réel si l'horaire cible est "maintenant" (à ±2h)
-    now = datetime.now()
-    delta_hours = abs((dt - now).total_seconds() / 3600)
-    if delta_hours <= 2:
-        try:
-            from api.utils.data_aggregator import DataAggregator
-            aggregator = DataAggregator()
-            point = {"lat": lat, "lng": lng}
-            agg = aggregator.get_aggregated_density_for_point(point, target_datetime=dt)
-            realtime = agg["density"]
-            density = round(0.65 * historical + 0.35 * realtime, 3)
-            model_type = "predictive_realtime"
-            confidence = 0.85
-        except Exception:
-            pass
+    # 2) Ajustement temps réel si l'horaire cible est "maintenant" (à ±2h) et non désactivé
+    if not skip_realtime:
+        now = datetime.now()
+        delta_hours = abs((dt - now).total_seconds() / 3600)
+        if delta_hours <= 2:
+            try:
+                from api.utils.data_aggregator import DataAggregator
+                aggregator = DataAggregator()
+                point = {"lat": lat, "lng": lng}
+                agg = aggregator.get_aggregated_density_for_point(point, target_datetime=dt)
+                realtime = agg["density"]
+                density = round(0.65 * historical + 0.35 * realtime, 3)
+                model_type = "predictive_realtime"
+                confidence = 0.85
+            except Exception:
+                pass
 
     density = min(0.98, max(0.05, density))
 

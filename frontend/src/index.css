@@ -5,7 +5,11 @@
   box-sizing: border-box;
 }
 
-/* Force le thème clair (évite les conflits avec prefers-color-scheme) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@500;600;700&display=swap');
+
 :root {
   color-scheme: light;
+  --color-teal: #A8E6CF;
+  --color-navy: #1A2238;
+  --font-heading: 'Montserrat', sans-serif;
 }

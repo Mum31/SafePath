@@ -9,7 +9,7 @@
 - Une **carte de crédit** et un **projet Google Cloud** sont requis pour activer l’API, même pour le gratuit.
 - Au-delà du gratuit : facturation au nombre de requêtes (cartes, directions, géocodage, etc.).
 
-**En pratique** : possible pour un **PFE / démo** si vous restez dans les plafonds gratuits. Pour un **projet 100 % gratuit et sans carte bancaire**, mieux vaut utiliser **Leaflet + OpenStreetMap** (ou garder **Mapbox** avec son quota gratuit).
+**En pratique** : possible pour un **PFE / démo** si vous restez dans les plafonds gratuits. Pour un **projet 100 % gratuit et sans carte bancaire**, SafePath utilise **uniquement Leaflet + OpenStreetMap**.
 
 ---
 
@@ -17,11 +17,10 @@
 
 | Solution              | Coût                    | Clé API        | Usage dans le projet        |
 |-----------------------|-------------------------|----------------|-----------------------------|
-| **Leaflet + OSM**     | 100 % gratuit           | Aucune         | **Par défaut** (fallback)   |
-| **Mapbox GL**         | ~50 000 vues/mois gratuites | `VITE_MAPBOX_TOKEN` | Si la clé est définie |
+| **Leaflet + OSM**     | 100 % gratuit           | Aucune         | **Uniquement** (cartes interactives + images statiques) |
 | **Google Maps**       | Plafonds gratuits puis payant | Clé Google   | Non intégré (voir ci‑dessous) |
 
-- Si **`VITE_MAPBOX_TOKEN`** est défini dans `.env`, la carte utilise **Mapbox**.
-- Sinon, la carte utilise **Leaflet + OpenStreetMap** (gratuit, sans clé).
+- Les cartes interactives utilisent **Leaflet** avec les tuiles **OpenStreetMap**.
+- Les aperçus statiques (fiche lieu, drawer) utilisent **staticmap.openstreetmap.de** (sans clé).
 
-Pour utiliser **Google Maps** plus tard : installer `@react-google-maps/api`, ajouter une clé et un composant dédié, en gardant Leaflet ou Mapbox en fallback si vous voulez éviter de dépasser les quotas.
+Pour utiliser **Google Maps** plus tard : installer `@react-google-maps/api`, ajouter une clé et un composant dédié, en gardant Leaflet + OSM en fallback si vous voulez éviter de dépasser les quotas.

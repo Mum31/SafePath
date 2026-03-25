@@ -29,8 +29,20 @@ def geocode_address(street: str, city: str, postal_code: str) -> Optional[Dict]:
     elif city:
         parts.append(city)
     address_query = ', '.join(parts) + ', France'
-    cache_key = f"geocode:{hash(address_query) % (2**32)}"
+    result = _geocode_query_cached(address_query)
+    if result is not None:
+        return result
+    # Fallback: sans code postal (mieux pour les noms de lieux type "Place de la Bastille")
+    if street and (city or postal_code):
+        fallback_query = f"{street}, {city or postal_code}, France"
+        if fallback_query != address_query:
+            return _geocode_query_cached(fallback_query)
+    return None
 
+
+def _geocode_query_cached(address_query: str) -> Optional[Dict]:
+    """Appel Nominatim/TomTom avec cache. Retourne {'lat', 'lng'} ou None."""
+    cache_key = f"geocode:{hash(address_query) % (2**32)}"
     try:
         from django.core.cache import cache
         cached = cache.get(cache_key)
@@ -39,7 +51,6 @@ def geocode_address(street: str, city: str, postal_code: str) -> Optional[Dict]:
     except Exception:
         pass
 
-    # Tentative TomTom
     tomtom_key = os.getenv('TOMTOM_API_KEY', '')
     if tomtom_key:
         try:
@@ -55,14 +66,13 @@ def geocode_address(street: str, city: str, postal_code: str) -> Optional[Dict]:
                         result = {'lat': float(lat), 'lng': float(lon)}
                         try:
                             from django.core.cache import cache
-                            cache.set(cache_key, result, 86400)  # 24h
+                            cache.set(cache_key, result, 86400)
                         except Exception:
                             pass
                         return result
         except Exception as e:
             print(f"TomTom geocoding: {e}")
 
-    # Fallback Nominatim (OpenStreetMap)
     try:
         resp = requests.get(
             'https://nominatim.openstreetmap.org/search',
@@ -77,13 +87,82 @@ def geocode_address(street: str, city: str, postal_code: str) -> Optional[Dict]:
                 result = {'lat': float(r['lat']), 'lng': float(r['lon'])}
                 try:
                     from django.core.cache import cache
-                    cache.set(cache_key, result, 86400)  # 24h
+                    cache.set(cache_key, result, 86400)
                 except Exception:
                     pass
                 return result
     except Exception as e:
         print(f"Nominatim geocoding: {e}")
+    return None
 
+
+def geocode_search(query: str) -> Optional[Dict]:
+    """
+    Géocode une requête libre (lieu, adresse, POI) pour la barre de recherche.
+    Retourne {'lat', 'lng', 'display_name'} ou None.
+    """
+    q = (query or '').strip()
+    if not q:
+        return None
+    address_query = q + ', France'
+    cache_key = f"geocode_search:{hash(address_query) % (2**32)}"
+    try:
+        from django.core.cache import cache
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+    except Exception:
+        pass
+
+    tomtom_key = os.getenv('TOMTOM_API_KEY', '')
+    if tomtom_key:
+        try:
+            url = 'https://api.tomtom.com/search/2/geocode/' + requests.utils.quote(address_query) + '.json'
+            resp = requests.get(url, params={'key': tomtom_key, 'limit': 1, 'countrySet': 'FR'}, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                results = data.get('results', [])
+                if results:
+                    r = results[0]
+                    pos = r.get('position', {})
+                    lat, lon = pos.get('lat'), pos.get('lon')
+                    if lat is not None and lon is not None:
+                        addr = r.get('address', {}) or {}
+                        display_name = addr.get('freeformAddress') or addr.get('municipality') or q
+                        result = {'lat': float(lat), 'lng': float(lon), 'display_name': display_name}
+                        try:
+                            from django.core.cache import cache
+                            cache.set(cache_key, result, 86400)
+                        except Exception:
+                            pass
+                        return result
+        except Exception as e:
+            print(f"TomTom search geocoding: {e}")
+
+    try:
+        resp = requests.get(
+            'https://nominatim.openstreetmap.org/search',
+            params={'q': address_query, 'format': 'json', 'limit': 1},
+            headers={'User-Agent': 'SafePath-PFE/1.0'},
+            timeout=10
+        )
+        if resp.status_code == 200:
+            results = resp.json()
+            if results:
+                r = results[0]
+                result = {
+                    'lat': float(r['lat']),
+                    'lng': float(r['lon']),
+                    'display_name': r.get('display_name', q),
+                }
+                try:
+                    from django.core.cache import cache
+                    cache.set(cache_key, result, 86400)
+                except Exception:
+                    pass
+                return result
+    except Exception as e:
+        print(f"Nominatim search geocoding: {e}")
     return None
 
 
@@ -132,7 +211,8 @@ class DataSourceManager:
             response = requests.get(
                 self.sources['openstreetmap']['url'],
                 params=params,
-                headers={'User-Agent': 'SafePath-PFE/1.0'}
+                headers={'User-Agent': 'SafePath-PFE/1.0'},
+                timeout=5
             )
             return response.json()
         except Exception as e:
@@ -162,7 +242,8 @@ class DataSourceManager:
         try:
             response = requests.get(
                 self.sources['tomtom_traffic']['url'],
-                params=params
+                params=params,
+                timeout=4
             )
             data = response.json()
             
@@ -198,7 +279,11 @@ class DataSourceManager:
         }
         
         try:
-            response = requests.get(self.sources['openweather']['url'], params=params)
+            response = requests.get(
+                self.sources['openweather']['url'],
+                params=params,
+                timeout=4
+            )
             response.raise_for_status()
             data = response.json()
             
@@ -354,7 +439,7 @@ class DataSourceManager:
         lat, lng = point['lat'], point['lng']
         delta = radius_m / 111000  # approx 1 deg = 111km
         query = f"""
-        [out:json][timeout:10];
+        [out:json][timeout:5];
         (
           node["public_transport"]({lat-delta},{lng-delta},{lat+delta},{lng+delta});
           node["railway"="station"]({lat-delta},{lng-delta},{lat+delta},{lng+delta});
@@ -367,7 +452,7 @@ class DataSourceManager:
                 OVERPASS_URL,
                 data={'data': query},
                 headers={'User-Agent': 'SafePath-PFE/1.0'},
-                timeout=10
+                timeout=5
             )
             if resp.status_code != 200:
                 return []

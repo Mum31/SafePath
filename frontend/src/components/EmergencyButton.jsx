@@ -1,11 +1,19 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { AlertCircle, MapPin, FileText, Wind, Phone, RefreshCw } from 'lucide-react';
 
-const EmergencyButton = ({ userLocation }) => {
+const BREATH_PHASES = [
+  { key: 'in', label: 'Inspirez', seconds: 4 },
+  { key: 'hold', label: 'Retenez', seconds: 4 },
+  { key: 'out', label: 'Expirez', seconds: 6 },
+];
+
+const EmergencyButton = ({ userLocation, onStartRouteToZone }) => {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [breath, setBreath] = useState({ idx: 0, remaining: BREATH_PHASES[0].seconds });
+  const closeBtnRef = useRef(null);
 
   const handleEmergency = async () => {
     if (!userLocation) {
@@ -48,12 +56,53 @@ const EmergencyButton = ({ userLocation }) => {
     setResult(null);
   };
 
+  const handleStartRoute = () => {
+    if (!onStartRouteToZone) return;
+    if (!result?.zone?.location) return;
+    onStartRouteToZone(result.zone);
+    closeModal();
+  };
+
+  useEffect(() => {
+    if (!showModal) return;
+
+    // Focus + escape to close
+    closeBtnRef.current?.focus();
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') closeModal();
+    };
+    document.addEventListener('keydown', onKeyDown);
+
+    // Prevent background scroll
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    // Reset + run breathing timer
+    setBreath({ idx: 0, remaining: BREATH_PHASES[0].seconds });
+    const interval = window.setInterval(() => {
+      setBreath((s) => {
+        if (s.remaining > 1) return { ...s, remaining: s.remaining - 1 };
+        const nextIdx = (s.idx + 1) % BREATH_PHASES.length;
+        return { idx: nextIdx, remaining: BREATH_PHASES[nextIdx].seconds };
+      });
+    }, 1000);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [showModal]);
+
+  const currentPhase = BREATH_PHASES[breath.idx];
+
   return (
     <>
       <button 
         onClick={handleEmergency}
         className="emergency-btn"
         disabled={loading}
+        aria-label="Ouvrir le mode urgence"
       >
         {loading ? (
           <span className="spinner"></span>
@@ -66,54 +115,88 @@ const EmergencyButton = ({ userLocation }) => {
       </button>
 
       {showModal && result && (
-        <div className="emergency-modal">
-          <div className="modal-content">
+        <div
+          className="emergency-modal"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closeModal();
+          }}
+        >
+          <div className="modal-content emergency-dialog" role="dialog" aria-modal="true" aria-labelledby="emergency-title">
             <div className="modal-header">
-              <h2><AlertCircle size={20} /> Assistance immédiate</h2>
-              <button onClick={closeModal} className="close-btn">×</button>
+              <h2 id="emergency-title"><AlertCircle size={20} /> Assistance immédiate</h2>
+              <button ref={closeBtnRef} onClick={closeModal} className="close-btn" aria-label="Fermer">×</button>
             </div>
             
             <div className="modal-body">
-              <div className="emergency-alert">
-                <div className="alert-icon"><AlertCircle size={24} /></div>
-                <div className="alert-message">
-                  <h3>Restez calme</h3>
-                  <p>Prenez une grande respiration et suivez ces instructions</p>
+              <div className="emergency-hero">
+                <div className="hero-icon"><AlertCircle size={22} /></div>
+                <div className="hero-text">
+                  <h3>Respirez. On s’occupe du reste.</h3>
+                  <p>Vous pouvez lancer un itinéraire vers une zone calme en 1 clic.</p>
+                </div>
+              </div>
+
+              <div className="emergency-stepper" aria-label="Étapes">
+                <div className="step-pill active">
+                  <span className="step-dot" />
+                  <span>Respiration</span>
+                </div>
+                <div className={`step-pill ${result.zone ? 'active' : ''}`}>
+                  <span className="step-dot" />
+                  <span>Zone calme</span>
+                </div>
+                <div className={`step-pill ${result.zone?.location && typeof onStartRouteToZone === 'function' ? 'active' : ''}`}>
+                  <span className="step-dot" />
+                  <span>Itinéraire</span>
+                </div>
+              </div>
+
+              <div className={`breathing-widget phase-${currentPhase.key}`} style={{ '--breath-duration': `${currentPhase.seconds}s` }}>
+                <div className="breathing-circle" aria-hidden="true" />
+                <div className="breathing-status">
+                  <div className="breathing-label"><Wind size={16} /> {currentPhase.label}</div>
+                  <div className="breathing-sub">Encore {breath.remaining}s</div>
                 </div>
               </div>
 
               {result.zone ? (
-                <div className="zone-found">
-                  <h3>📍 Zone calme trouvée</h3>
-                  <div className="zone-details">
-                    <div className="zone-name">
-                      <strong>{result.zone.name}</strong>
-                      <span className="zone-type">{result.zone.type_display || result.zone.type}</span>
+                <div className="emergency-zone">
+                  <div className="emergency-zone-head">
+                    <div className="emergency-zone-title">
+                      <div className="zone-name">{result.zone.name}</div>
+                      <div className="zone-chips">
+                        <span className="zone-chip">{result.zone.type_display || result.zone.type}</span>
+                        <span className="zone-chip good">Confort {Math.round(result.zone.comfort_score * 100)}%</span>
+                      </div>
                     </div>
-                    <div className="zone-info">
-                      <div className="info-item">
-                        <span className="label">Distance :</span>
-                        <span className="value">{result.zone.distance} m</span>
-                      </div>
-                      <div className="info-item">
-                        <span className="label">Temps de marche :</span>
-                        <span className="value">{result.zone.estimated_walk_time} min</span>
-                      </div>
-                      <div className="info-item">
-                        <span className="label">Direction :</span>
-                        <span className="value">{result.zone.direction}</span>
-                      </div>
-                      <div className="info-item">
-                        <span className="label">Niveau de confort :</span>
-                        <span className="value">{Math.round(result.zone.comfort_score * 100)}%</span>
-                      </div>
+
+                    {result.zone?.location && typeof onStartRouteToZone === 'function' && (
+                      <button onClick={handleStartRoute} className="btn-route btn-route-inline">
+                        <MapPin size={16} /> Itinéraire
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="emergency-zone-stats">
+                    <div className="stat">
+                      <span className="k">Distance</span>
+                      <span className="v">{result.zone.distance} m</span>
+                    </div>
+                    <div className="stat">
+                      <span className="k">Temps</span>
+                      <span className="v">{result.zone.estimated_walk_time} min</span>
+                    </div>
+                    <div className="stat">
+                      <span className="k">Direction</span>
+                      <span className="v">{result.zone.direction}</span>
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="zone-not-found">
-                  <h3><AlertCircle size={16} /> Aucune zone calme proche</h3>
-                  <p>Voici des alternatives :</p>
+                <div className="emergency-zone empty">
+                  <div className="empty-title"><AlertCircle size={16} /> Aucune zone calme proche</div>
+                  <div className="empty-sub">Voici des alternatives simples, tout de suite.</div>
                 </div>
               )}
 
@@ -124,25 +207,6 @@ const EmergencyButton = ({ userLocation }) => {
                     <li key={index}>{instruction}</li>
                   ))}
                 </ul>
-              </div>
-
-              <div className="breathing-exercise">
-                <h3><Wind size={16} /> Exercice de respiration</h3>
-                <div className="breathing-guide">
-                  <div className="breath-step">
-                    <div className="step-icon"><Wind size={20} /></div>
-                    <div className="step-text">Inspirez profondément pendant 4 secondes</div>
-                  </div>
-                  <div className="breath-step">
-                    <div className="step-icon">⏸️</div>
-                    <div className="step-text">Retenez votre souffle pendant 4 secondes</div>
-                  </div>
-                  <div className="breath-step">
-                    <div className="step-icon"><Wind size={20} /></div>
-                    <div className="step-text">Expirez lentement pendant 6 secondes</div>
-                  </div>
-                </div>
-                <p className="breathing-tip">Répétez 5 fois pour réduire l'anxiété</p>
               </div>
 
               <div className="emergency-contacts">
@@ -163,7 +227,7 @@ const EmergencyButton = ({ userLocation }) => {
 
             <div className="modal-footer">
               <button onClick={closeModal} className="btn-close">
-                J'ai compris
+                Fermer
               </button>
               <button onClick={handleEmergency} className="btn-refresh">
                 <RefreshCw size={16} /> Rechercher à nouveau

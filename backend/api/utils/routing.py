@@ -28,7 +28,7 @@ def get_walking_route(
         'annotations': 'true'
     }
     try:
-        resp = requests.get(url, params=params, timeout=15)
+        resp = requests.get(url, params=params, timeout=5)
         if resp.status_code != 200:
             return None, None, None
         data = resp.json()

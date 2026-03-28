@@ -38,7 +38,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="C:\Users\HP 840 G6\safe-path\.venv"
+VIRTUAL_ENV="C:\Users\HP 840 G6\Documents\GitHub\SafePath\.venv"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

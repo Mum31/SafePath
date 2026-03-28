@@ -4,12 +4,17 @@ Django settings for safe_path_api project.
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR.parent / '.env')
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = '8##q#2in&8%hc0wq6eju5@q^fb7i-)q(-647vd6x$v98j2o5n3'
+JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', SECRET_KEY)
+JWT_ACCESS_TOKEN_LIFETIME_SECONDS = int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME_SECONDS', '900'))
+JWT_REFRESH_TOKEN_LIFETIME_SECONDS = int(os.getenv('JWT_REFRESH_TOKEN_LIFETIME_SECONDS', '604800'))
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -104,6 +109,9 @@ CORS_ALLOWED_ORIGINS = [
 
 # REST Framework
 REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'api.authentication.JWTAuthentication',
+    ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
     ]

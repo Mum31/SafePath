@@ -1,10 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, ZoomControl } from 'react-leaflet';
+import { MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents, ZoomControl } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet.heat';
+import { LocateFixed } from 'lucide-react';
 
-/* Heatmap : faible densité = vert, moyenne = orange, élevée = rouge */
 const HEATMAP_GRADIENT = {
   0.0: 'rgba(34, 197, 94, 0)',
   0.2: 'rgb(134, 239, 172)',
@@ -28,10 +28,10 @@ function HeatLayer({ densityData }) {
       return;
     }
 
-    const points = densityData.map((p) => [
-      p.location.lat,
-      p.location.lng,
-      Math.min(1, Math.max(0, p.density ?? 0)),
+    const points = densityData.map((item) => [
+      item.location.lat,
+      item.location.lng,
+      Math.min(1, Math.max(0, item.density ?? 0)),
     ]);
 
     if (heatRef.current) {
@@ -54,49 +54,61 @@ function HeatLayer({ densityData }) {
         heatRef.current = null;
       }
     };
-  }, [map, densityData]);
+  }, [densityData, map]);
 
   return null;
 }
 
 function MapClickHandler({ onMapClick }) {
   useMapEvents({
-    click(e) {
-      if (onMapClick) onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
+    click(event) {
+      onMapClick?.({ lat: event.latlng.lat, lng: event.latlng.lng });
     },
   });
+
   return null;
 }
 
 function CenterUpdater({ userLocation }) {
   const map = useMap();
+
   useEffect(() => {
-    if (!userLocation) return;
+    if (!userLocation) {
+      return;
+    }
+
     map.flyTo([userLocation.lat, userLocation.lng], 13, { duration: 1.2 });
-  }, [map, userLocation?.lat, userLocation?.lng]);
+  }, [map, userLocation]);
+
   return null;
 }
 
 function SearchLocationUpdater({ searchLocation }) {
   const map = useMap();
+
   useEffect(() => {
-    if (!searchLocation?.lat || !searchLocation?.lng) return;
+    if (!searchLocation?.lat || !searchLocation?.lng) {
+      return;
+    }
+
     map.flyTo([searchLocation.lat, searchLocation.lng], 15, { duration: 1 });
-  }, [map, searchLocation?.lat, searchLocation?.lng]);
+  }, [map, searchLocation]);
+
   return null;
 }
 
 function createSearchMarkerIcon() {
   return L.divIcon({
     className: 'search-result-marker',
-    html: '<span class="search-marker-pin" title="Résultat de recherche">📍</span>',
-    iconSize: [32, 32],
-    iconAnchor: [16, 32],
+    html: '<span class="search-marker-pin" title="Resultat de recherche"><span class="search-marker-core"></span></span>',
+    iconSize: [42, 42],
+    iconAnchor: [21, 36],
   });
 }
 
 function LocateControl() {
   const map = useMap();
+
   return (
     <button
       type="button"
@@ -106,15 +118,20 @@ function LocateControl() {
         map.locate({ setView: true, maxZoom: 15 });
       }}
     >
-      📍
+      <LocateFixed size={18} />
     </button>
   );
 }
 
-const MapExploration = ({ userLocation, densityData, onMapClick, loading, searchLocation, onSearchLocationClick }) => {
-  const center = userLocation
-    ? [userLocation.lat, userLocation.lng]
-    : [48.8566, 2.3522];
+export default function MapExploration({
+  userLocation,
+  densityData,
+  onMapClick,
+  loading,
+  searchLocation,
+  onSearchLocationClick,
+}) {
+  const center = userLocation ? [userLocation.lat, userLocation.lng] : [48.8566, 2.3522];
 
   return (
     <div className="map-exploration-container">
@@ -124,7 +141,7 @@ const MapExploration = ({ userLocation, densityData, onMapClick, loading, search
         zoom={12}
         className="map-exploration map-exploration-leaflet"
         zoomControl={false}
-        attributionControl={true}
+        attributionControl
       >
         <ZoomControl position="topright" />
         <TileLayer
@@ -134,6 +151,7 @@ const MapExploration = ({ userLocation, densityData, onMapClick, loading, search
         <HeatLayer densityData={densityData} />
         <MapClickHandler onMapClick={onMapClick} />
         <CenterUpdater userLocation={userLocation} />
+
         {searchLocation?.lat != null && searchLocation?.lng != null && (
           <>
             <SearchLocationUpdater searchLocation={searchLocation} />
@@ -145,17 +163,20 @@ const MapExploration = ({ userLocation, densityData, onMapClick, loading, search
               }}
             >
               <Popup>
-                <span className="marker-popup-title">{searchLocation.display_name || 'Lieu recherché'}</span>
+                <span className="marker-popup-title">
+                  {searchLocation.name || searchLocation.display_name || 'Lieu recherche'}
+                </span>
                 <br />
-                <span className="marker-popup-hint">Cliquez pour voir l’affluence</span>
+                <span className="marker-popup-hint">
+                  {searchLocation.address || "Cliquez pour voir l'affluence"}
+                </span>
               </Popup>
             </Marker>
           </>
         )}
+
         <LocateControl />
       </MapContainer>
     </div>
   );
-};
-
-export default MapExploration;
+}

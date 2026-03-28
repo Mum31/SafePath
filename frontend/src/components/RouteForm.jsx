@@ -1,146 +1,67 @@
 import React, { useState } from 'react';
-import { MapPin, ArrowDownUp, Crosshair, Clock, ChevronRight } from 'lucide-react';
+import { ArrowDownUp, CalendarClock, Crosshair, Sparkles } from 'lucide-react';
 
-const CITIES = [
-  { id: 'paris', name: 'Paris', postalCode: '75001' },
-  { id: 'lyon', name: 'Lyon', postalCode: '69001' },
-  { id: 'marseille', name: 'Marseille', postalCode: '13001' },
-];
-
-export default function RouteForm({
-  onCalculateRoute,
-  userLocation,
-  loading,
-  selectedCity,
-  onCityChange,
-  error,
-  onClearError,
-}) {
-  const [depart, setDepart] = useState('');
-  const [arrivee, setArrivee] = useState('');
+export default function RouteForm({ onCalculateRoute, userLocation, loading, error, onClearError }) {
+  const [origin, setOrigin] = useState('');
+  const [destination, setDestination] = useState('');
   const [useMyPosition, setUseMyPosition] = useState(false);
-  const [showHour, setShowHour] = useState(false);
-  const [targetHour, setTargetHour] = useState(null);
+  const [travelWhen, setTravelWhen] = useState('now');
+  const [travelDatetime, setTravelDatetime] = useState('');
 
-  const city = CITIES.find((c) => c.id === selectedCity) || CITIES[0];
+  const canSubmit = (useMyPosition || origin.trim()) && destination.trim() && !loading;
 
-  const buildOrigin = () => {
-    if (useMyPosition && userLocation) {
-      return { lat: userLocation.lat, lng: userLocation.lng };
-    }
-    const street = depart.trim() || city.name;
-    return { street, city: city.name, postal_code: city.postalCode };
-  };
-
-  const buildDestination = () => {
-    const street = arrivee.trim() || city.name;
-    return { street, city: city.name, postal_code: city.postalCode };
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  const handleSubmit = (event) => {
+    event.preventDefault();
     onClearError?.();
-    const origin = buildOrigin();
-    const dest = buildDestination();
-    if (!arrivee.trim()) return;
-    if (!useMyPosition && !depart.trim()) return;
-    onCalculateRoute(origin, dest, targetHour);
+    onCalculateRoute(
+      useMyPosition && userLocation ? { lat: userLocation.lat, lng: userLocation.lng, name: 'Ma position' } : { query: origin.trim() },
+      { query: destination.trim() },
+      travelWhen === 'planned' && travelDatetime ? { travel_datetime: travelDatetime } : {}
+    );
   };
-
-  const handleSwap = () => {
-    const prevDep = useMyPosition ? '' : depart;
-    setDepart(arrivee);
-    setArrivee(prevDep);
-    setUseMyPosition(false);
-  };
-
-  const handleUseMyPosition = () => {
-    setUseMyPosition(true);
-    setDepart('Ma position');
-    if (!userLocation) {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          () => setDepart('Ma position'),
-          () => setDepart('')
-        );
-      }
-    }
-  };
-
-  const canSubmit = (useMyPosition || depart.trim()) && arrivee.trim() && !loading;
 
   return (
     <div className="route-form-card">
-      <h2 className="route-form-title">On va où ?</h2>
+      <div className="journey-form-kicker"><Sparkles size={14} /> Itineraires Ile-de-France</div>
+      <h2 className="route-form-title">Ou voulez-vous aller ?</h2>
       <form onSubmit={handleSubmit} className="route-form">
         <div className="route-form-fields">
           <div className="route-field">
-            <label htmlFor="depart">Départ</label>
+            <label htmlFor="route-origin">Depart</label>
             {useMyPosition ? (
-              <div className="route-field-display">
-                <span>Ma position</span>
-                <button type="button" className="route-field-link" onClick={() => { setUseMyPosition(false); setDepart(''); }}>
-                  Changer
-                </button>
-              </div>
+              <div className="route-field-display"><span>Ma position actuelle</span><button type="button" className="route-field-link" onClick={() => { setUseMyPosition(false); setOrigin(''); }}>Changer</button></div>
             ) : (
-              <input
-                id="depart"
-                type="text"
-                value={depart}
-                onChange={(e) => setDepart(e.target.value)}
-                placeholder="Lieu ou adresse"
-                autoComplete="off"
-              />
+              <input id="route-origin" type="text" value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="Adresse, gare, arret ou lieu" autoComplete="off" />
             )}
           </div>
-          <button type="button" className="route-swap-btn" onClick={handleSwap} title="Inverser">
-            <ArrowDownUp size={20} />
+          <button type="button" className="route-swap-btn" onClick={() => { const previousOrigin = useMyPosition ? '' : origin; setOrigin(destination); setDestination(previousOrigin); setUseMyPosition(false); }} title="Inverser">
+            <ArrowDownUp size={18} />
           </button>
           <div className="route-field">
-            <label htmlFor="arrivee">Arrivée</label>
-            <input
-              id="arrivee"
-              type="text"
-              value={arrivee}
-              onChange={(e) => setArrivee(e.target.value)}
-              placeholder="Lieu ou adresse"
-              autoComplete="off"
-              required
-            />
+            <label htmlFor="route-destination">Arrivee</label>
+            <input id="route-destination" type="text" value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="Ex. Gare de Lyon, La Defense, Tour Eiffel" autoComplete="off" required />
           </div>
         </div>
-        <button type="button" className="route-now-link" onClick={() => setShowHour(!showHour)}>
-          {showHour ? 'Masquer l\'heure' : 'Maintenant'}
-          <ChevronRight size={16} className={showHour ? 'rotated' : ''} />
-        </button>
-        {showHour && (
-          <div className="route-hour-row">
-            <Clock size={16} />
-            <select
-              value={targetHour ?? ''}
-              onChange={(e) => setTargetHour(e.target.value ? parseInt(e.target.value, 10) : null)}
-              className="route-hour-select"
-            >
-              <option value="">Maintenant</option>
-              {Array.from({ length: 24 }, (_, i) => (
-                <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
-              ))}
-            </select>
+
+        <div className="journey-planning-row">
+          <div className="journey-planning-toggle">
+            <button type="button" className={`journey-planning-btn ${travelWhen === 'now' ? 'active' : ''}`} onClick={() => setTravelWhen('now')}>Maintenant</button>
+            <button type="button" className={`journey-planning-btn ${travelWhen === 'planned' ? 'active' : ''}`} onClick={() => setTravelWhen('planned')}><CalendarClock size={14} /> Planifier</button>
           </div>
-        )}
+          {travelWhen === 'planned' && (
+            <input className="journey-datetime-input" type="datetime-local" value={travelDatetime} onChange={(event) => setTravelDatetime(event.target.value)} />
+          )}
+        </div>
+
         {error && <div className="route-form-error" role="alert">{error}</div>}
+
         <div className="route-form-actions">
-          <button type="button" className="route-my-position" onClick={handleUseMyPosition} disabled={!userLocation}>
+          <button type="button" className="route-my-position" onClick={() => { setUseMyPosition(true); setOrigin('Ma position'); }} disabled={!userLocation}>
             <Crosshair size={16} /> Utiliser ma position
           </button>
-          <button type="submit" className="route-go-btn" disabled={!canSubmit}>
-            {loading ? <span className="route-go-spinner" /> : 'GO'}
-          </button>
+          <button type="submit" className="route-go-btn" disabled={!canSubmit}>{loading ? <span className="route-go-spinner" /> : 'Comparer les trajets'}</button>
         </div>
       </form>
     </div>
   );
 }
-
-export { CITIES };

@@ -6,6 +6,13 @@ import {
   TrendingDown, Users, MapPin, Quote, ChevronRight, Sparkles, Search
 } from 'lucide-react';
 import '../App.css';
+import jwtLogo from '../assets/brands/jwt.svg';
+import openStreetMapLogo from '../assets/brands/openstreetmap.svg';
+import leafletLogo from '../assets/brands/leaflet.png';
+import openWeatherLogo from '../assets/brands/openweather.svg';
+import tomTomLogo from '../assets/brands/tomtom.png';
+import googleMapsLogo from '../assets/brands/google-maps.webp';
+import idfmNavitiaLogo from '../assets/brands/idfm-navitia.svg';
 
 const fadeInUp = {
   hidden: { opacity: 0, y: 32 },
@@ -107,6 +114,72 @@ const LandingPage = () => {
     { q: "Qu’est-ce que la recommandation IA de trajets calmes et sécurisés ?", a: "SafePath analyse la densité de foule, les zones calmes (parcs, rues apaisées) et vos préférences pour vous recommander un itinéraire piéton limitant le stress. Le trajet affiché est celui recommandé par notre algorithme." },
     { q: "Quelles villes sont couvertes ?", a: "Paris, Lyon, Marseille, Bordeaux, Toulouse, Nantes, Lille, Strasbourg. D’autres villes peuvent être ajoutées." },
     { q: "Comment est calculé l’indice de sérénité ?", a: "Nous croisons la densité de foule, le bruit estimé, la largeur des trottoirs et la proximité des parcs pour une note sur 10." },
+  ];
+
+  const integrations = [
+    {
+      key: 'jwt',
+      label: 'JWT Auth',
+      category: 'Authentification',
+      detail: 'Connexion sécurisée et gestion des tokens.',
+      logo: jwtLogo,
+      alt: 'Logo JWT',
+      logoClass: 'is-wide',
+    },
+    {
+      key: 'osm',
+      label: 'OpenStreetMap',
+      category: 'Cartographie',
+      detail: 'Fond de carte, geocodage et données ouvertes.',
+      logo: openStreetMapLogo,
+      alt: 'Logo OpenStreetMap',
+      logoClass: 'is-wide',
+    },
+    {
+      key: 'leaflet',
+      label: 'Leaflet',
+      category: 'Map UI',
+      detail: 'Rendu interactif des cartes et heatmaps.',
+      logo: leafletLogo,
+      alt: 'Logo Leaflet',
+      logoClass: 'is-standard',
+    },
+    {
+      key: 'openweather',
+      label: 'OpenWeather',
+      category: 'Météo',
+      detail: 'Contexte météo pour affiner la prédiction.',
+      logo: openWeatherLogo,
+      alt: 'Logo OpenWeather',
+      logoClass: 'is-wide',
+    },
+    {
+      key: 'tomtom',
+      label: 'TomTom',
+      category: 'Traffic',
+      detail: 'Recherche d’adresses et signaux trafic.',
+      logo: tomTomLogo,
+      alt: 'Logo TomTom',
+      logoClass: 'is-icon',
+    },
+    {
+      key: 'googlemaps',
+      label: 'Google Maps',
+      category: 'Street View',
+      detail: 'Panoramas et aperçus immersifs.',
+      logo: googleMapsLogo,
+      alt: 'Logo Google Maps',
+      logoClass: 'is-icon',
+    },
+    {
+      key: 'navitia',
+      label: 'IDFM Navitia',
+      category: 'Mobilité',
+      detail: 'Trajets, lignes et perturbations temps réel.',
+      logo: idfmNavitiaLogo,
+      alt: 'Logo Île-de-France Mobilités',
+      logoClass: 'is-wide',
+    },
   ];
 
   return (
@@ -236,6 +309,49 @@ const LandingPage = () => {
           <p className="tagline-strip-text">
             Moins de foule, plus de sérénité. <span className="tagline-accent">Votre trajet le plus zen en un clic.</span>
           </p>
+        </div>
+      </motion.section>
+
+      <motion.section
+        className="landing-section landing-brand-strip"
+        initial={{ opacity: 0, y: 28 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: '-60px' }}
+        transition={{ duration: 0.55 }}
+      >
+        <div className="landing-container">
+          <div className="landing-brand-header">
+            <span className="landing-brand-eyebrow">
+              <Sparkles size={16} />
+              Services intégrés
+            </span>
+            <h2 className="landing-section-title landing-brand-title">
+              SafePath s’appuie sur les APIs et moteurs qui font vivre l’expérience.
+            </h2>
+            <p className="landing-section-lead landing-brand-lead">
+              Cartographie, météo, trafic, authentification, panoramas et transport: tout le stack utile est réuni ici.
+            </p>
+          </div>
+
+          <div className="landing-brand-grid">
+            {integrations.map((item) => (
+              <div key={item.key} className="landing-brand-card">
+                <div className="landing-brand-logo-frame">
+                  <img
+                    src={item.logo}
+                    alt={item.alt}
+                    className={`landing-brand-logo-image ${item.logoClass || ''}`}
+                    loading="lazy"
+                  />
+                </div>
+                <div className="landing-brand-copy">
+                  <span className="landing-brand-category">{item.category}</span>
+                  <h3>{item.label}</h3>
+                  <p>{item.detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </motion.section>
 

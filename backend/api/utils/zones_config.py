@@ -8,10 +8,10 @@ from typing import Dict, List, Optional, Tuple
 ZONES_BY_ID: Dict[str, Dict] = {
     'paris': {
         'label': 'Paris',
-        'south': 48.84,
-        'west': 2.32,
-        'north': 48.88,
-        'east': 2.42,
+        'south': 48.80,
+        'west': 2.20,
+        'north': 48.91,
+        'east': 2.45,
         'center': {'lat': 48.8566, 'lng': 2.3522},
     },
     'lyon': {

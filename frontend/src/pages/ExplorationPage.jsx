@@ -1,27 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import {
-  Compass,
-  Info,
-  Loader2,
-  LocateFixed,
-  Radar,
-  Route,
-  Search,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  TreePine,
-  Umbrella,
-  Waves,
-} from 'lucide-react';
+import { Compass, Loader2, LocateFixed, MapPin, Radar, Search, Sparkles } from 'lucide-react';
 import axios from 'axios';
 
 import MapExploration from '../components/MapExploration';
 import PlaceDrawer from '../components/PlaceDrawer';
 import '../App.css';
+import './ExplorationPage.css';
 import { buildForecastTargets } from '../utils/forecast';
 
+const PARIS_FALLBACK_COORDS = { lat: 48.8566, lng: 2.3522 };
 const formatCoordinatesLabel = (lat, lng) => `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`;
 const formatDensityPercent = (value) => `${Math.round((Number(value) || 0) * 100)}%`;
 
@@ -37,22 +25,17 @@ export default function ExplorationPage() {
   const [selectedPlace, setSelectedPlace] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [placeDrawerLoading, setPlaceDrawerLoading] = useState(false);
-  const [filters, setFilters] = useState({
-    parcsOnly: false,
-    avoidMainRoads: true,
-    zonesCouvertes: false,
-  });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!navigator.geolocation) {
-      setUserLocation({ lat: 48.8566, lng: 2.3522 });
+      setUserLocation(PARIS_FALLBACK_COORDS);
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
       (position) => setUserLocation({ lat: position.coords.latitude, lng: position.coords.longitude }),
-      () => setUserLocation({ lat: 48.8566, lng: 2.3522 })
+      () => setUserLocation(PARIS_FALLBACK_COORDS)
     );
   }, []);
 
@@ -122,6 +105,11 @@ export default function ExplorationPage() {
     setSearchLocation(null);
   };
 
+  const handleResetView = () => {
+    handleClearSearch();
+    setDrawerOpen(false);
+  };
+
   useEffect(() => {
     setLoading(true);
     axios
@@ -135,11 +123,15 @@ export default function ExplorationPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const densityData = predictions.map((prediction) => ({
-    location: prediction.location,
-    density: prediction.density,
-    confidence: prediction.confidence || 0.7,
-  }));
+  const densityData = useMemo(
+    () =>
+      predictions.map((prediction) => ({
+        location: prediction.location,
+        density: prediction.density,
+        confidence: prediction.confidence || 0.7,
+      })),
+    [predictions]
+  );
 
   const densitySummary = useMemo(() => {
     const total = densityData.length;
@@ -152,50 +144,12 @@ export default function ExplorationPage() {
     return { total, calm, moderate, dense, averageDensity };
   }, [densityData]);
 
-  const activeFilters = useMemo(
-    () =>
-      [
-        filters.parcsOnly ? 'Parcs uniquement' : null,
-        filters.avoidMainRoads ? 'Grands axes évités' : null,
-        filters.zonesCouvertes ? 'Zones couvertes' : null,
-      ].filter(Boolean),
-    [filters]
-  );
-
   const focusTitle = searchLocation?.name || searchLocation?.display_name || 'Paris en direct';
   const focusSubtitle =
     searchLocation?.address ||
-    (userLocation ? `Autour de votre position • ${formatCoordinatesLabel(userLocation.lat, userLocation.lng)}` : 'Vue globale de la ville');
-
-  const explorationInsights = useMemo(() => {
-    const insights = [];
-
-    if (densitySummary.calm > densitySummary.dense) {
-      insights.push('La carte affiche actuellement davantage de zones calmes que de zones denses.');
-    } else if (densitySummary.dense > 0) {
-      insights.push('Plusieurs poches de densité sont visibles: privilégiez les zones vertes pour un trajet serein.');
-    } else {
-      insights.push('La carte est globalement stable pour le moment, avec peu de densité critique.');
-    }
-
-    if (filters.parcsOnly) {
-      insights.push('Le filtre parcs aide à repérer rapidement des points de respiration à proximité.');
-    }
-
-    if (filters.avoidMainRoads) {
-      insights.push('Le mode évitement des grands axes favorise des parcours plus confortables et moins exposés.');
-    }
-
-    if (filters.zonesCouvertes) {
-      insights.push('Les zones couvertes sont utiles pour lisser le confort en cas d’intempéries ou d’affluence variable.');
-    }
-
-    if (!insights.length) {
-      insights.push('Activez un ou plusieurs filtres pour personnaliser l’exploration selon votre niveau de confort.');
-    }
-
-    return insights.slice(0, 3);
-  }, [densitySummary, filters]);
+    (userLocation
+      ? `Autour de votre position • ${formatCoordinatesLabel(userLocation.lat, userLocation.lng)}`
+      : 'Vue globale de la ville');
 
   const resolvePlaceDetails = useCallback(async (lat, lng, fallbackName, fallbackAddress) => {
     try {
@@ -297,7 +251,7 @@ export default function ExplorationPage() {
 
   const handleSearchLocationClick = useCallback(
     (location) => {
-      if (!location?.lat || !location?.lng) {
+      if (location?.lat == null || location?.lng == null) {
         return;
       }
 
@@ -311,256 +265,156 @@ export default function ExplorationPage() {
     [fetchPlaceDensity]
   );
 
+  const handleOpenMyLocation = () => {
+    if (!userLocation) {
+      return;
+    }
+
+    fetchPlaceDensity(userLocation.lat, userLocation.lng, 'Ma position', formatCoordinatesLabel(userLocation.lat, userLocation.lng));
+  };
+
   return (
-    <div className="exploration-page">
-      <section className="exploration-hero">
-        <div className="exploration-hero-copy">
-          <span className="exploration-kicker">
-            <Sparkles size={16} />
-            Exploration intelligente
-          </span>
-          <h1>Explorez la ville avec une lecture plus claire, plus calme, plus moderne.</h1>
-          <p>
-            Repérez les zones sereines, concentrez-vous sur un quartier précis et ouvrez les détails d’un lieu en un clic
-            pour mieux décider avant de vous déplacer.
-          </p>
+    <div className="ep-root">
+      <header className="ep-topbar">
+        <div className="ep-brand" aria-hidden="true">
+          <span className="ep-brand-dot" />
+          <span className="ep-brand-label">EXPLORATION</span>
         </div>
 
-        <div className="exploration-hero-stats">
-          <article className="exploration-stat-card">
-            <span className="exploration-stat-label">Zone focus</span>
-            <strong>{focusTitle}</strong>
-            <p>{focusSubtitle}</p>
-          </article>
-          <article className="exploration-stat-card">
-            <span className="exploration-stat-label">Lecture moyenne</span>
-            <strong>{formatDensityPercent(densitySummary.averageDensity)}</strong>
-            <p>{densitySummary.total} points analysés sur la carte courante.</p>
-          </article>
-          <article className="exploration-stat-card is-accent">
-            <span className="exploration-stat-label">Zones calmes</span>
-            <strong>{densitySummary.calm}</strong>
-            <p>{activeFilters.length} filtre{activeFilters.length > 1 ? 's' : ''} actif{activeFilters.length > 1 ? 's' : ''}.</p>
-          </article>
-        </div>
-      </section>
-
-      <section className="exploration-workspace">
-        <div className="exploration-main-column">
-          <div className="exploration-control-shell">
-            <div className="exploration-panel-head">
-              <div>
-                <span className="exploration-panel-kicker">
-                  <Compass size={15} />
-                  Recherche et filtres
-                </span>
-                <h2>Cadrez rapidement votre zone d’exploration</h2>
-              </div>
-              <span className="exploration-filter-count">
-                <SlidersHorizontal size={15} />
-                {activeFilters.length} actif{activeFilters.length > 1 ? 's' : ''}
-              </span>
-            </div>
-
-            <form
-              className="exploration-search-bar"
-              onSubmit={handleSearchSubmit}
-              role="search"
-              aria-label="Rechercher un lieu sur la carte"
-            >
-              <Search size={20} className="search-icon" aria-hidden />
-              <input
-                type="search"
-                placeholder="Adresse ou lieu (ex. Tour Eiffel, Place de la Bastille...)"
-                value={searchQuery}
-                onChange={(event) => {
-                  setSearchQuery(event.target.value);
-                  setSearchError(null);
-                }}
-                className="exploration-search-input"
-                aria-label="Rechercher un lieu pour voir l'affluence"
-                aria-describedby={searchError ? 'search-error' : undefined}
-                autoComplete="off"
-              />
-              {searchLoading && (
-                <span className="exploration-search-spinner" aria-hidden>
-                  <Loader2 size={20} className="spin" />
-                </span>
-              )}
-              {searchQuery.trim() && (
-                <button
-                  type="button"
-                  className="exploration-search-clear"
-                  onClick={handleClearSearch}
-                  aria-label="Effacer la recherche"
-                >
-                  x
-                </button>
-              )}
-              <button type="submit" className="exploration-search-btn">
-                Voir sur la carte
+        <div className="ep-search-wrap">
+          <form className="ep-search-form" onSubmit={handleSearchSubmit} role="search" aria-label="Rechercher un lieu">
+            <Search size={18} />
+            <input
+              type="search"
+              className="ep-search-input"
+              placeholder="Tour Eiffel, gare, quartier..."
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setSearchError(null);
+              }}
+              aria-describedby={searchError ? 'ep-search-error' : undefined}
+              autoComplete="off"
+            />
+            {searchLoading && <Loader2 size={18} className="ep-spin" />}
+            {searchQuery.trim() && (
+              <button type="button" className="ep-search-clear" onClick={handleClearSearch} aria-label="Effacer">
+                x
               </button>
-            </form>
-
-            {searchError && (
-              <p id="search-error" className="exploration-search-error" role="alert">
-                {searchError}
-              </p>
             )}
+            <button type="submit" className="ep-search-btn">
+              Voir
+            </button>
+          </form>
 
-            <div className="exploration-filters">
-              <button
-                type="button"
-                className={`filter-chip ${filters.parcsOnly ? 'active' : ''}`}
-                onClick={() => setFilters((current) => ({ ...current, parcsOnly: !current.parcsOnly }))}
-              >
-                <TreePine size={16} /> Parcs uniquement
-              </button>
-              <button
-                type="button"
-                className={`filter-chip ${filters.avoidMainRoads ? 'active' : ''}`}
-                onClick={() => setFilters((current) => ({ ...current, avoidMainRoads: !current.avoidMainRoads }))}
-              >
-                <Route size={16} /> Eviter les grands axes
-              </button>
-              <button
-                type="button"
-                className={`filter-chip ${filters.zonesCouvertes ? 'active' : ''}`}
-                onClick={() => setFilters((current) => ({ ...current, zonesCouvertes: !current.zonesCouvertes }))}
-              >
-                <Umbrella size={16} /> Zones couvertes
-              </button>
+          {searchError && (
+            <div id="ep-search-error" className="ep-search-error" role="alert">
+              {searchError}
             </div>
+          )}
+        </div>
 
-            <div className="exploration-active-row">
-              <div className="exploration-active-card">
-                <LocateFixed size={18} />
-                <div>
-                  <strong>Point de vue actuel</strong>
-                  <span>{focusTitle}</span>
-                </div>
-              </div>
-              <div className="exploration-active-card">
-                <Radar size={18} />
-                <div>
-                  <strong>Carte analysée</strong>
-                  <span>{densitySummary.total} zones avec densité estimée</span>
-                </div>
-              </div>
+        <div className="ep-stats">
+          <div className="ep-stat">
+            <span className="ep-stat-dot calm" />
+            <span className="ep-stat-num">{densitySummary.calm}</span>
+            <span className="ep-stat-lbl">calmes</span>
+          </div>
+          <div className="ep-stat">
+            <span className="ep-stat-dot avg" />
+            <span className="ep-stat-num">{formatDensityPercent(densitySummary.averageDensity)}</span>
+            <span className="ep-stat-lbl">moyenne</span>
+          </div>
+          <div className="ep-stat">
+            <span className="ep-stat-dot dense" />
+            <span className="ep-stat-num">{densitySummary.dense}</span>
+            <span className="ep-stat-lbl">denses</span>
+          </div>
+        </div>
+      </header>
+
+      <section className="ep-map-area">
+        <MapExploration
+          userLocation={userLocation}
+          densityData={densityData}
+          onMapClick={handleMapClick}
+          searchLocation={searchLocation}
+          onSearchLocationClick={handleSearchLocationClick}
+        />
+
+        {loading && (
+          <div className="ep-loading" role="status" aria-live="polite">
+            <Loader2 size={18} className="ep-spin" />
+            <span>Mise a jour de la densite...</span>
+          </div>
+        )}
+
+        <div className="ep-map-info">
+          <div className="ep-info-pill">
+            <div className="ep-info-pill-icon">
+              <Radar size={14} />
+            </div>
+            <div className="ep-info-pill-text">
+              <strong>{focusTitle}</strong>
+              <span>{focusSubtitle}</span>
             </div>
           </div>
 
-          <div className="exploration-map-card">
-            <div className="exploration-map-header">
-              <div>
-                <span className="exploration-panel-kicker">
-                  <Waves size={15} />
-                  Heatmap urbaine
-                </span>
-                <h2>Vue en direct de l’affluence</h2>
-              </div>
-              <div className="exploration-map-header-badges">
-                <span className="exploration-map-badge is-calm">Calmes: {densitySummary.calm}</span>
-                <span className="exploration-map-badge is-dense">Denses: {densitySummary.dense}</span>
-              </div>
+          <div className="ep-info-pill">
+            <div className="ep-info-pill-icon">
+              <MapPin size={14} />
             </div>
-
-            <div className="exploration-map-wrap">
-              <MapExploration
-                userLocation={userLocation}
-                densityData={densityData}
-                onMapClick={handleMapClick}
-                loading={loading}
-                searchLocation={searchLocation}
-                onSearchLocationClick={handleSearchLocationClick}
-              />
-
-              <div className="exploration-map-overlay exploration-map-overlay-top">
-                <div className="exploration-overlay-card">
-                  <span className="exploration-overlay-label">Focus</span>
-                  <strong>{focusTitle}</strong>
-                  <p>{searchLocation ? 'Cliquez le repère pour ouvrir son analyse détaillée.' : 'Cliquez sur la carte pour inspecter un lieu.'}</p>
-                </div>
-                <div className="exploration-overlay-mini-grid">
-                  <div className="exploration-overlay-mini">
-                    <span>Calme</span>
-                    <strong>{densitySummary.calm}</strong>
-                  </div>
-                  <div className="exploration-overlay-mini">
-                    <span>Modéré</span>
-                    <strong>{densitySummary.moderate}</strong>
-                  </div>
-                  <div className="exploration-overlay-mini">
-                    <span>Dense</span>
-                    <strong>{densitySummary.dense}</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div className="heatmap-legend exploration-legend">
-                <span className="legend-item">
-                  <span className="dot calm" /> Calme
-                </span>
-                <span className="legend-item">
-                  <span className="dot moderate" /> Modéré
-                </span>
-                <span className="legend-item">
-                  <span className="dot dense" /> Dense
-                </span>
-              </div>
+            <div className="ep-info-pill-text">
+              <strong>Action rapide</strong>
+              <span>{searchLocation ? 'Touchez le repere ou ouvrez sa fiche en bas.' : 'Touchez la carte pour analyser un point.'}</span>
             </div>
           </div>
         </div>
 
-        <aside className="exploration-side-column">
-          <article className="exploration-side-card">
-            <span className="exploration-panel-kicker">
-              <Info size={15} />
-              Lecture rapide
-            </span>
-            <h3>Comment interpréter la carte</h3>
-            <ul className="exploration-insight-list">
-              <li>Vert: zone plus respirable et souvent plus confortable pour marcher.</li>
-              <li>Orange: fréquentation intermédiaire, à surveiller selon votre sensibilité.</li>
-              <li>Rouge: densité plus forte, idéale à contourner si vous cherchez un trajet apaisé.</li>
-            </ul>
-          </article>
+        <div className="ep-hint">
+          <Compass size={13} />
+          Carte live de densite. Un clic ouvre le detail du lieu.
+        </div>
 
-          <article className="exploration-side-card is-highlight">
-            <span className="exploration-panel-kicker">
-              <ShieldCheck size={15} />
-              Lecture SafePath
-            </span>
-            <h3>Recommandations du moment</h3>
-            <ul className="exploration-insight-list">
-              {explorationInsights.map((insight) => (
-                <li key={insight}>{insight}</li>
-              ))}
-            </ul>
-          </article>
+        <div className="ep-legend" aria-label="Legende de densite">
+          <span className="ep-legend-item">
+            <span className="ep-legend-dot calm" />
+            Calme
+          </span>
+          <span className="ep-legend-item">
+            <span className="ep-legend-dot moderate" />
+            Modere
+          </span>
+          <span className="ep-legend-item">
+            <span className="ep-legend-dot dense" />
+            Dense
+          </span>
+        </div>
 
-          <article className="exploration-side-card">
-            <span className="exploration-panel-kicker">
-              <SlidersHorizontal size={15} />
-              Filtres actifs
-            </span>
-            <h3>Votre configuration</h3>
-            <div className="exploration-active-tags">
-              {activeFilters.length ? (
-                activeFilters.map((label) => (
-                  <span key={label} className="exploration-active-tag">
-                    {label}
-                  </span>
-                ))
-              ) : (
-                <span className="exploration-active-tag is-muted">Aucun filtre spécifique</span>
-              )}
-            </div>
-            <p className="exploration-side-note">
-              Astuce: combinez la recherche avec un clic sur la carte pour comparer plusieurs lieux très vite.
-            </p>
-          </article>
-        </aside>
+        <div className="ep-filter-bar" aria-label="Actions rapides">
+          <button type="button" className={`ep-filter-chip ${!searchLocation ? 'active' : ''}`} onClick={handleResetView}>
+            <Sparkles size={14} />
+            Paris
+          </button>
+          <button type="button" className="ep-filter-chip" onClick={handleOpenMyLocation} disabled={!userLocation}>
+            <LocateFixed size={14} />
+            Autour de moi
+          </button>
+          {searchLocation && (
+            <button type="button" className="ep-filter-chip active" onClick={() => handleSearchLocationClick(searchLocation)}>
+              <MapPin size={14} />
+              Ouvrir {searchLocation.name || 'le lieu'}
+            </button>
+          )}
+          {searchLocation && (
+            <>
+              <span className="ep-filter-sep" aria-hidden="true" />
+              <button type="button" className="ep-filter-chip" onClick={handleResetView}>
+                Effacer le focus
+              </button>
+            </>
+          )}
+        </div>
       </section>
 
       <PlaceDrawer

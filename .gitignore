@@ -1,2 +1,20 @@
 node_modules
-node_modules
+
+# Environment variables
+.env*
+!.env.example
+
+# Databases
+backend/db.sqlite3
+backend/data/historical/
+backend/data/models/
+
+# Logs
+*.log
+!.env.example
+
+# OS generated
+.DS_Store
+Thumbs.db
+.DS_Store?
+

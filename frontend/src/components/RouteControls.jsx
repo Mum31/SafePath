@@ -36,13 +36,13 @@ const RouteControls = ({ onCalculateRoute, userLocation, loading }) => {
         origin: { street: 'Place de la Bastille', city: 'Paris', postal_code: '75011' },
         destination: { street: 'Place de la République', city: 'Paris', postal_code: '75011' }
       },
-      lyon: {
-        origin: { street: 'Place Bellecour', city: 'Lyon', postal_code: '69002' },
-        destination: { street: 'Place des Terreaux', city: 'Lyon', postal_code: '69001' }
+      versailles: {
+        origin: { street: 'Château de Versailles', city: 'Versailles', postal_code: '78000' },
+        destination: { street: 'Place du Marché Notre-Dame', city: 'Versailles', postal_code: '78000' }
       },
-      marseille: {
-        origin: { street: 'Vieux-Port', city: 'Marseille', postal_code: '13001' },
-        destination: { street: 'Castellane', city: 'Marseille', postal_code: '13006' }
+      defense: {
+        origin: { street: 'Grande Arche', city: 'Puteaux', postal_code: '92800' },
+        destination: { street: 'Esplanade de la Défense', city: 'Puteaux', postal_code: '92800' }
       }
     };
     const loc = locations[type];
@@ -167,10 +167,10 @@ const RouteControls = ({ onCalculateRoute, userLocation, loading }) => {
           </button>
           
           <div className="quick-cities">
-            <span>Villes rapides:</span>
+            <span>Trajets rapides:</span>
             <button type="button" onClick={() => handleQuickSelect('paris')}>Paris</button>
-            <button type="button" onClick={() => handleQuickSelect('lyon')}>Lyon</button>
-            <button type="button" onClick={() => handleQuickSelect('marseille')}>Marseille</button>
+            <button type="button" onClick={() => handleQuickSelect('versailles')}>Versailles</button>
+            <button type="button" onClick={() => handleQuickSelect('defense')}>La Défense</button>
           </div>
         </div>
 

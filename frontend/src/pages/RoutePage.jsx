@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
@@ -19,13 +20,10 @@ import {
   Waves,
 } from 'lucide-react';
 
-import ApiStatus from '../components/ApiStatus';
-import EmergencyButton from '../components/EmergencyButton';
 import MapComponent from '../components/MapComponent';
 import PanoramaModal from '../components/PanoramaModal';
 import RouteForm from '../components/RouteForm';
 import StreetViewPanorama from '../components/StreetViewPanorama';
-import StressFilters from '../components/StressFilters';
 import '../App.css';
 import { api } from '../services/api';
 import { buildStreetPreviewUrl } from '../utils/placePreview';
@@ -40,27 +38,25 @@ const DEFAULT_USER_PREFERENCES = {
   transportFactor: 0.15,
 };
 
-const USER_ID_STORAGE_KEY = 'safepath.route.userId';
-
 const MODE_META = {
   transit: {
     label: 'Transport',
-    subtitle: 'Metro, RER, train, tram, bus',
+    subtitle: 'Métro, bus, RER…',
     Icon: TrainFront,
   },
   walking: {
     label: 'A pied',
-    subtitle: 'Le plus simple pour les trajets directs',
+    subtitle: 'Trajet direct',
     Icon: Footprints,
   },
   bike: {
     label: 'Velo',
-    subtitle: 'Rapide sur moyenne distance',
+    subtitle: 'Moyenne distance',
     Icon: Bike,
   },
   car: {
     label: 'Voiture',
-    subtitle: 'Lecture trafic et axes routiers',
+    subtitle: 'Axes & trafic',
     Icon: CarFront,
   },
 };
@@ -82,36 +78,6 @@ const TRANSPORT_LABELS = {
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function getPersistentUserId() {
-  try {
-    const existing = window.localStorage.getItem(USER_ID_STORAGE_KEY);
-    if (existing) {
-      return existing;
-    }
-    const generated = `user_${Date.now()}`;
-    window.localStorage.setItem(USER_ID_STORAGE_KEY, generated);
-    return generated;
-  } catch {
-    return `user_${Date.now()}`;
-  }
-}
-
-function mapPreferencesResponse(payload = {}) {
-  return {
-    maxDensity: toNumber(payload.max_crowd_density, DEFAULT_USER_PREFERENCES.maxDensity),
-    avoidMainRoads:
-      payload.avoid_main_roads == null ? DEFAULT_USER_PREFERENCES.avoidMainRoads : Boolean(payload.avoid_main_roads),
-    preferParks: payload.prefer_parks == null ? DEFAULT_USER_PREFERENCES.preferParks : Boolean(payload.prefer_parks),
-    noiseSensitivity: toNumber(payload.noise_sensitivity, DEFAULT_USER_PREFERENCES.noiseSensitivity),
-    walkingSpeed: toNumber(payload.walking_speed, DEFAULT_USER_PREFERENCES.walkingSpeed),
-    considerPublicTransport:
-      payload.consider_public_transport == null
-        ? DEFAULT_USER_PREFERENCES.considerPublicTransport
-        : Boolean(payload.consider_public_transport),
-    transportFactor: toNumber(payload.transport_factor, DEFAULT_USER_PREFERENCES.transportFactor),
-  };
 }
 
 function formatMinutes(value) {
@@ -359,13 +325,11 @@ function SegmentCard({ index, segment, onPreview }) {
 }
 
 export default function RoutePage() {
-  const userIdRef = useRef(getPersistentUserId());
+  const [searchParams] = useSearchParams();
+  const routeIntentRef = useRef(null);
   const [userLocation, setUserLocation] = useState(null);
-  const [apiStatus, setApiStatus] = useState('Verification...');
   const [loading, setLoading] = useState(false);
   const [routeError, setRouteError] = useState(null);
-  const [userPreferences, setUserPreferences] = useState(DEFAULT_USER_PREFERENCES);
-  const [preferencesHydrated, setPreferencesHydrated] = useState(false);
   const [primaryRoute, setPrimaryRoute] = useState(null);
   const [routeOptions, setRouteOptions] = useState({});
   const [selectedMode, setSelectedMode] = useState('transit');
@@ -444,18 +408,39 @@ export default function RoutePage() {
     [modeCounts]
   );
 
+  const routeIntent = useMemo(() => {
+    const lat = Number(searchParams.get('lat'));
+    const lng = Number(searchParams.get('lng'));
+    const arrivee = (searchParams.get('arrivee') || searchParams.get('destination') || searchParams.get('name') || '').trim();
+    const address = (searchParams.get('address') || '').trim();
+
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return {
+        key: `${lat}:${lng}:${arrivee}:${address}`,
+        destination: {
+          lat,
+          lng,
+          name: arrivee || 'Destination',
+          address: address || arrivee || 'Destination',
+        },
+      };
+    }
+
+    if (arrivee) {
+      return {
+        key: `query:${arrivee}`,
+        destination: {
+          query: arrivee,
+          name: arrivee,
+          address: address || arrivee,
+        },
+      };
+    }
+
+    return null;
+  }, [searchParams]);
+
   useEffect(() => {
-    const loadBootData = async () => {
-      try {
-        await api.get('/test/');
-        setApiStatus('API connectee');
-      } catch {
-        setApiStatus('API non connectee');
-      }
-    };
-
-    loadBootData();
-
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -470,60 +455,6 @@ export default function RoutePage() {
       setUserLocation({ lat: 48.8566, lng: 2.3522 });
     }
   }, []);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadUserPreferences = async () => {
-      try {
-        const response = await api.get('/user-preferences/', {
-          params: { user_id: userIdRef.current },
-        });
-        if (isMounted && response.data?.user_id) {
-          setUserPreferences(mapPreferencesResponse(response.data));
-        }
-      } catch {
-        if (isMounted) {
-          setUserPreferences(DEFAULT_USER_PREFERENCES);
-        }
-      } finally {
-        if (isMounted) {
-          setPreferencesHydrated(true);
-        }
-      }
-    };
-
-    loadUserPreferences();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!preferencesHydrated) {
-      return undefined;
-    }
-
-    const timeoutId = window.setTimeout(async () => {
-      try {
-        await api.post('/user-preferences/', {
-          user_id: userIdRef.current,
-          max_crowd_density: userPreferences.maxDensity,
-          avoid_main_roads: userPreferences.avoidMainRoads,
-          prefer_parks: userPreferences.preferParks,
-          noise_sensitivity: userPreferences.noiseSensitivity,
-          walking_speed: userPreferences.walkingSpeed,
-          consider_public_transport: userPreferences.considerPublicTransport,
-          transport_factor: userPreferences.transportFactor,
-        });
-      } catch {
-        // Preferences are still kept locally even if persistence fails.
-      }
-    }, 650);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [preferencesHydrated, userPreferences]);
 
   useEffect(() => {
     if (!selectedModeRoutes.length) {
@@ -553,6 +484,27 @@ export default function RoutePage() {
     setPreviewTarget(nextPreview);
   }, [destinationPlace, selectedRoute]);
 
+  useEffect(() => {
+    if (!routeIntent || !userLocation || loading) {
+      return;
+    }
+
+    if (routeIntentRef.current === routeIntent.key) {
+      return;
+    }
+
+    routeIntentRef.current = routeIntent.key;
+
+    handleCalculateRoute(
+      {
+        lat: userLocation.lat,
+        lng: userLocation.lng,
+        name: 'Ma position',
+      },
+      routeIntent.destination
+    );
+  }, [routeIntent, userLocation, loading]);
+
   const handleCalculateRoute = async (origin, destination, options = {}) => {
     setLoading(true);
     setRouteError(null);
@@ -561,8 +513,7 @@ export default function RoutePage() {
       const payload = {
         origin,
         destination,
-        user_id: userIdRef.current,
-        preferences: userPreferences,
+        preferences: DEFAULT_USER_PREFERENCES,
         modes: Object.keys(MODE_META),
         preferred_mode: selectedMode,
         ...options,
@@ -646,24 +597,19 @@ export default function RoutePage() {
   const highlightCards = selectedRoute
     ? [
         {
-          label: 'Duree estimee',
+          label: 'Duree',
           value: formatMinutes(selectedRoute.estimated_time || selectedRoute.duration_minutes),
-          note: `${formatMeters(selectedRoute.distance || selectedRoute.distance_m)} sur le parcours`,
+          meta: formatMeters(selectedRoute.distance || selectedRoute.distance_m),
         },
         {
           label: 'Depart',
           value: formatDateTime(selectedRoute.departure_time),
-          note: selectedRoute.arrival_time ? `Arrivee ${formatDateTime(selectedRoute.arrival_time)}` : 'En direct',
+          meta: selectedRoute.arrival_time ? formatDateTime(selectedRoute.arrival_time) : 'Direct',
         },
         {
-          label: 'Confort',
-          value: `${selectedRoute.comfort?.calm_score || 0}/100`,
-          note: selectedRoute.comfort?.label || 'Analyse en cours',
-        },
-        {
-          label: 'Correspondances',
-          value: String(selectedRoute.transfers || 0),
-          note: formatFare(selectedRoute.fare),
+          label: 'Mode choisi',
+          value: selectedRoute.mode_label || MODE_META[selectedMode]?.label || 'Trajet',
+          meta: `${selectedRoute.comfort?.calm_score || 0}/100 calme • ${formatFare(selectedRoute.fare)}`,
         },
       ]
     : [];
@@ -677,38 +623,32 @@ export default function RoutePage() {
         <section className="journey-hero">
           <div className="journey-hero-copy">
             <span className="journey-kicker">
-              <Sparkles size={14} /> Navigation urbaine repensee
+              <Sparkles size={14} /> Itineraire SafePath
             </span>
-            <h1>Une page itineraire enfin plus claire, plus guidee et plus credible.</h1>
-            <p>
-              Comparez vos trajets comme dans une vraie console de mobilite: modes distincts, etapes lisibles,
-              trafic, perturbations, panorama 360 et score de calme reunis dans une seule interface.
-            </p>
-
-            <div className="journey-hero-facts">
-              {heroFacts.map((fact) => (
-                <div key={fact.label} className="journey-hero-fact">
-                  <span>{fact.label}</span>
-                  <strong>{fact.value}</strong>
-                </div>
-              ))}
-            </div>
+            <h1>Trouvez un trajet plus vite.</h1>
+            <p>Entrez votre destination, choisissez un mode, puis consultez la carte et les etapes dans le meme flux.</p>
 
             <div className="journey-hero-trust">
               <div className="journey-trust-card">
                 <ShieldCheck size={18} />
                 <div>
-                  <strong>Sources synchronisees</strong>
-                  <span>Navitia, trafic, meteo, densite et perturbations.</span>
+                  <strong>Données agrégées</strong>
+                  <span>Navitia, densité, trafic.</span>
                 </div>
               </div>
               <div className="journey-trust-card">
                 <Waves size={18} />
                 <div>
-                  <strong>Lecture apaisante</strong>
-                  <span>Vue carte, timeline et zone immersive sans surcharge.</span>
+                  <strong>Vue claire</strong>
+                  <span>Carte + ligne du temps + panorama.</span>
                 </div>
               </div>
+            </div>
+
+            <div className="journey-hero-steps" aria-label="Etapes rapides">
+              <span className="journey-hero-step">1. Saisir le trajet</span>
+              <span className="journey-hero-step">2. Choisir un mode</span>
+              <span className="journey-hero-step">3. Suivre la meilleure option</span>
             </div>
           </div>
 
@@ -732,10 +672,7 @@ export default function RoutePage() {
 
               <div className="journey-command-summary">
                 <h2>{routeMetadata?.recommendation_summary || selectedRoute.summary || 'Trajet recommande'}</h2>
-                <p>
-                  {selectedRoute.recommended ? 'Option la plus calme detectee' : 'Alternative a comparer'}{' '}
-                  {routeMetadata?.calculation_time_ms ? `- calcule en ${routeMetadata.calculation_time_ms} ms` : ''}
-                </p>
+                <p>Choisissez un mode ou une option pour mettre a jour la carte, les horaires et les etapes.</p>
               </div>
             </div>
 
@@ -744,7 +681,7 @@ export default function RoutePage() {
                 <div key={card.label} className="journey-summary-card">
                   <span>{card.label}</span>
                   <strong>{card.value}</strong>
-                  <p>{card.note}</p>
+                  <p>{card.meta}</p>
                 </div>
               ))}
             </div>
@@ -757,7 +694,7 @@ export default function RoutePage() {
               <div className="journey-card-head">
                 <div>
                   <h2>Modes</h2>
-                  <span>Choisissez la logique la plus adaptee a votre deplacement.</span>
+                  <span>Comment vous déplacez-vous ?</span>
                 </div>
               </div>
 
@@ -781,7 +718,6 @@ export default function RoutePage() {
                         <span className="journey-chip muted">{count || 0}</span>
                       </div>
                       <strong>{meta.label}</strong>
-                      <span>{meta.subtitle}</span>
                     </button>
                   );
                 })}
@@ -793,7 +729,7 @@ export default function RoutePage() {
                 <div className="journey-card-head">
                   <div>
                     <h2>Alternatives</h2>
-                    <span>{selectedModeRoutes.length} proposition(s) pour ce mode.</span>
+                    <span>{selectedModeRoutes.length} option(s) pour ce mode</span>
                   </div>
                 </div>
 
@@ -807,11 +743,7 @@ export default function RoutePage() {
                     >
                       <div className="journey-option-top">
                         <div>
-                          <strong>
-                            Option {index + 1}
-                            {route.recommended ? ' - Recommandee' : ''}
-                          </strong>
-                          <p className="journey-summary-text">{route.summary || route.comfort?.label || 'Trajet analyse'}</p>
+                          <strong>{route.recommended ? 'Recommandee' : `Option ${index + 1}`}</strong>
                         </div>
                         <span className="journey-chip">{formatMinutes(route.estimated_time || route.duration_minutes)}</span>
                       </div>
@@ -829,22 +761,12 @@ export default function RoutePage() {
               </section>
             )}
 
-            <section className="journey-card journey-card-floating">
-              <div className="journey-card-head">
-                <div>
-                  <h2>Preferences de confort</h2>
-                  <span>Ces reglages influencent la recommandation SafePath.</span>
-                </div>
-              </div>
-              <StressFilters preferences={userPreferences} onPreferencesChange={setUserPreferences} />
-            </section>
-
             {routeHistory.length > 0 && (
-              <section className="journey-card journey-card-floating">
+              <section className="journey-card journey-card-floating journey-history-card">
                 <div className="journey-card-head">
                   <div>
-                    <h2>Recherches recentes</h2>
-                    <span>Pour relancer rapidement un trajet proche.</span>
+                    <h2>Recents</h2>
+                    <span>Vos derniers trajets</span>
                   </div>
                 </div>
 
@@ -866,10 +788,6 @@ export default function RoutePage() {
                 </div>
               </section>
             )}
-
-            <section className="journey-card journey-card-floating">
-              <ApiStatus status={apiStatus} />
-            </section>
           </aside>
 
           <section className="journey-stage">
@@ -878,7 +796,7 @@ export default function RoutePage() {
                 <article className="journey-card journey-map-card">
                   <div className="journey-card-head">
                     <div>
-                      <h2>Carte dynamique</h2>
+                      <h2>Carte du trajet</h2>
                       <span>
                         {selectedRoute.mode_label || MODE_META[selectedMode]?.label} -{' '}
                         {selectedRoute.comfort?.average_density_pct || 0}% densite moyenne
@@ -916,7 +834,7 @@ export default function RoutePage() {
                     <div className="journey-card-head">
                       <div>
                         <h2>Etapes du trajet</h2>
-                        <span>Lecture sequentielle proche d'un calculateur moderne.</span>
+                        <span>{(selectedRoute.segments || []).length} etape(s)</span>
                       </div>
                     </div>
 
@@ -931,8 +849,8 @@ export default function RoutePage() {
                     <article className="journey-card">
                       <div className="journey-card-head">
                         <div>
-                          <h2>Horaires et lignes</h2>
-                          <span>Depart, arrivee, reseaux et codes de ligne.</span>
+                          <h2>Lignes et horaires</h2>
+                          <span>Les infos utiles pour partir</span>
                         </div>
                       </div>
 
@@ -979,8 +897,8 @@ export default function RoutePage() {
                     <article className="journey-card">
                       <div className="journey-card-head">
                         <div>
-                          <h2>Arrets, perturbations et contexte</h2>
-                          <span>Ce qui influence vraiment le confort du parcours.</span>
+                          <h2>Infos utiles</h2>
+                          <span>Arrets, perturbations et contexte</span>
                         </div>
                       </div>
 
@@ -1027,7 +945,6 @@ export default function RoutePage() {
                           <CheckCircle2 size={16} />
                           <div>
                             <strong>Aucune perturbation majeure</strong>
-                            <p>Le reseau selectionne ne remonte pas d'alerte bloquante.</p>
                           </div>
                         </div>
                       )}
@@ -1081,7 +998,7 @@ export default function RoutePage() {
                     <article className="journey-card">
                       <div className="journey-card-head">
                         <div>
-                          <h2>Apercu immersif</h2>
+                          <h2>Vue du lieu</h2>
                           <span>
                             {previewTarget?.name || destinationPlace?.name || 'Destination'} -{' '}
                             {previewTarget?.address || destinationPlace?.address || 'Point cible'}
@@ -1103,9 +1020,7 @@ export default function RoutePage() {
                         <button type="button" className="journey-inline-action" onClick={() => setPanoramaOpen(true)}>
                           <Maximize2 size={15} /> Plein ecran
                         </button>
-                        <p className="journey-panorama-caption">
-                          Cliquez sur une etape, un arret ou une zone calme pour changer le point d'observation.
-                        </p>
+                        <p className="journey-panorama-caption">Cliquez sur une etape pour changer le point.</p>
                       </div>
                     </article>
                   </div>
@@ -1114,25 +1029,16 @@ export default function RoutePage() {
             ) : (
               <section className="journey-empty-state">
                 <span className="journey-kicker">
-                  <Sparkles size={14} /> Interface repensee
+                  <Sparkles size={14} /> Itineraire
                 </span>
-                <h2>Entrez un depart et une arrivee pour afficher une experience bien plus lisible.</h2>
-                <p>
-                  La page mettra ensuite en scene les modes de transport, la timeline, le trafic, les perturbations,
-                  les zones calmes et le panorama 360 sans melanger toutes les informations.
-                </p>
+                <h2>Entrez un depart et une arrivee.</h2>
+                <p>Saisissez votre trajet pour voir directement la carte, le meilleur mode et les etapes a suivre.</p>
                 <div className="journey-empty-features">
                   <span>
-                    <TrainFront size={16} /> Onglets transport facon calculateur moderne
+                    <TrainFront size={16} /> Modes compares
                   </span>
                   <span>
-                    <MapPin size={16} /> Carte, arrets, lignes et points de vue lies
-                  </span>
-                  <span>
-                    <AlertTriangle size={16} /> Perturbations et contexte directement visibles
-                  </span>
-                  <span>
-                    <Maximize2 size={16} /> Street View 360 integre a la page
+                    <MapPin size={16} /> Carte et etapes
                   </span>
                 </div>
               </section>
@@ -1149,29 +1055,6 @@ export default function RoutePage() {
         placeName={previewTarget?.name || destinationPlace?.name}
         address={previewTarget?.address || destinationPlace?.address || destinationPlace?.name}
         fallback={previewFallback}
-      />
-
-      <EmergencyButton
-        userLocation={userLocation}
-        onStartRouteToZone={(zone) => {
-          if (!userLocation || !zone?.location) {
-            return;
-          }
-
-          handleCalculateRoute(
-            {
-              lat: userLocation.lat,
-              lng: userLocation.lng,
-              name: 'Ma position',
-            },
-            {
-              lat: zone.location.lat,
-              lng: zone.location.lng,
-              name: zone.name,
-              address: zone.name,
-            }
-          );
-        }}
       />
     </div>
   );

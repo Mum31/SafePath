@@ -91,13 +91,6 @@ export const calculateRoute = async (origin, destination, preferences) => {
   return response.data;
 };
 
-export const getEmergencyCalmZone = async (lat, lng, radius = 500) => {
-  const response = await api.get('/emergency-calm-zone/', {
-    params: { lat, lng, radius },
-  });
-  return response.data;
-};
-
 export const getCrowdData = async (bbox) => {
   const response = await api.get('/crowd-data/', {
     params: { bbox: bbox.join(',') },

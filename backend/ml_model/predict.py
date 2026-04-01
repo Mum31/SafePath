@@ -112,11 +112,13 @@ def predict_density(
                 aggregator = DataAggregator()
                 point = {'lat': lat, 'lng': lng}
                 aggregated = aggregator.get_aggregated_density_for_point(point, target_datetime=dt)
-                realtime_density = aggregated['density']
-                realtime_weight = round(max(0.12, 0.35 - delta_hours * 0.06), 3)
-                density = round((1 - realtime_weight) * density + realtime_weight * realtime_density, 3)
-                model_type = 'predictive_realtime_blended'
-                confidence = min(0.9, round(0.76 + realtime_weight * 0.35, 2))
+                realtime_confidence = float(aggregated.get('confidence') or 0.0)
+                if realtime_confidence >= 0.35:
+                    realtime_density = aggregated['density']
+                    realtime_weight = round(max(0.12, 0.35 - delta_hours * 0.06), 3)
+                    density = round((1 - realtime_weight) * density + realtime_weight * realtime_density, 3)
+                    model_type = 'predictive_realtime_blended'
+                    confidence = min(0.9, round(0.76 + realtime_weight * 0.35, 2))
             except Exception:
                 pass
 

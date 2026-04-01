@@ -22,8 +22,9 @@ export default function RouteForm({ onCalculateRoute, userLocation, loading, err
 
   return (
     <div className="route-form-card">
-      <div className="journey-form-kicker"><Sparkles size={14} /> Itineraires Ile-de-France</div>
-      <h2 className="route-form-title">Ou voulez-vous aller ?</h2>
+      <div className="journey-form-kicker"><Sparkles size={14} /> Itineraire</div>
+      <h2 className="route-form-title">Calculer un trajet</h2>
+      <p className="journey-form-help">Le plus simple : utilisez votre position puis indiquez votre destination.</p>
       <form onSubmit={handleSubmit} className="route-form">
         <div className="route-form-fields">
           <div className="route-field">
@@ -31,7 +32,7 @@ export default function RouteForm({ onCalculateRoute, userLocation, loading, err
             {useMyPosition ? (
               <div className="route-field-display"><span>Ma position actuelle</span><button type="button" className="route-field-link" onClick={() => { setUseMyPosition(false); setOrigin(''); }}>Changer</button></div>
             ) : (
-              <input id="route-origin" type="text" value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="Adresse, gare, arret ou lieu" autoComplete="off" />
+              <input id="route-origin" type="text" value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="Adresse, gare ou lieu" autoComplete="off" />
             )}
           </div>
           <button type="button" className="route-swap-btn" onClick={() => { const previousOrigin = useMyPosition ? '' : origin; setOrigin(destination); setDestination(previousOrigin); setUseMyPosition(false); }} title="Inverser">
@@ -59,7 +60,7 @@ export default function RouteForm({ onCalculateRoute, userLocation, loading, err
           <button type="button" className="route-my-position" onClick={() => { setUseMyPosition(true); setOrigin('Ma position'); }} disabled={!userLocation}>
             <Crosshair size={16} /> Utiliser ma position
           </button>
-          <button type="submit" className="route-go-btn" disabled={!canSubmit}>{loading ? <span className="route-go-spinner" /> : 'Comparer les trajets'}</button>
+          <button type="submit" className="route-go-btn" disabled={!canSubmit}>{loading ? <span className="route-go-spinner" /> : 'Voir les trajets'}</button>
         </div>
       </form>
     </div>

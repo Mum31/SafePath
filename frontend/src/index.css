@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap');
 
 /* Reset global - base minimal pour SafePath */
 * {
@@ -7,9 +7,19 @@
   box-sizing: border-box;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 :root {
   color-scheme: light;
-  --color-teal: #A8E6CF;
-  --color-navy: #1A2238;
-  --font-heading: 'Montserrat', sans-serif;
+  --color-teal: #7dd3c0;
+  --color-navy: #0f172a;
+  --font-heading: 'Plus Jakarta Sans', system-ui, sans-serif;
 }

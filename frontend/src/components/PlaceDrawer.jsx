@@ -10,6 +10,7 @@ import 'leaflet/dist/leaflet.css';
 import ChartErrorBoundary from './ChartErrorBoundary';
 import PanoramaModal from './PanoramaModal';
 import StreetViewPanorama from './StreetViewPanorama';
+import { DENSITY_GUIDE } from '../utils/densityDisplay';
 import { buildStreetPreviewUrl, hasStreetPreviewProvider } from '../utils/placePreview';
 
 const formatCoordinatesLabel = (lat, lng) => `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`;
@@ -202,6 +203,14 @@ export default function PlaceDrawer({ open, onClose, place, loading = false }) {
                         />
                       </div>
                       <span className="density-gauge-value">{densityPercent} %</span>
+                    </div>
+                    <div className="density-guide density-guide-compact">
+                      {DENSITY_GUIDE.map((item) => (
+                        <div key={item.id} className={`density-guide-item tone-${item.tone}`}>
+                          <strong>{item.range}</strong>
+                          <span>{item.text}</span>
+                        </div>
+                      ))}
                     </div>
                   </section>
 

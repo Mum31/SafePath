@@ -127,21 +127,25 @@ export default function MapExploration({
   userLocation,
   densityData,
   onMapClick,
-  loading,
   searchLocation,
   onSearchLocationClick,
 }) {
   const center = userLocation ? [userLocation.lat, userLocation.lng] : [48.8566, 2.3522];
+  const searchMarkerIconRef = useRef(null);
+
+  if (!searchMarkerIconRef.current) {
+    searchMarkerIconRef.current = createSearchMarkerIcon();
+  }
 
   return (
     <div className="map-exploration-container">
-      {loading && <div className="map-exploration-loading" />}
       <MapContainer
         center={center}
         zoom={12}
         className="map-exploration map-exploration-leaflet"
         zoomControl={false}
         attributionControl
+        preferCanvas
       >
         <ZoomControl position="topright" />
         <TileLayer
@@ -157,7 +161,7 @@ export default function MapExploration({
             <SearchLocationUpdater searchLocation={searchLocation} />
             <Marker
               position={[searchLocation.lat, searchLocation.lng]}
-              icon={createSearchMarkerIcon()}
+              icon={searchMarkerIconRef.current}
               eventHandlers={{
                 click: () => onSearchLocationClick?.(searchLocation),
               }}

@@ -1,24 +1,29 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import axios from 'axios';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Activity,
-  ArrowRight,
   BellRing,
+  Bike,
+  BriefcaseBusiness,
+  CalendarClock,
+  CarFront,
+  Check,
   Clock3,
+  Footprints,
   Gauge,
-  Layers,
+  Home,
   LocateFixed,
-  MapPinned,
-  RefreshCw,
+  MapPin,
   Route as RouteIcon,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
-  TrendingUp,
+  TrainFront,
   TriangleAlert,
 } from 'lucide-react';
+
 import MapComponent from '../components/MapComponent';
 import { useAuth } from '../context/useAuth';
+import { api } from '../services/api';
 import './Dashboard.css';
 
 const ZONES_FALLBACK = [
@@ -28,133 +33,308 @@ const ZONES_FALLBACK = [
   { id: 'bordeaux', label: 'Bordeaux' },
 ];
 
-const VIEWS = [
-  { id: 'map', label: 'Carte' },
-  { id: 'stats', label: 'Stats' },
-  { id: 'routes', label: 'Trajets' },
-  { id: 'alerts', label: 'Alertes' },
-  { id: 'ai', label: 'Assistant' },
-];
+const DASHBOARD_PROFILE_PREFIX = 'safepath.dashboard.profile';
 
-const PROFILES = ['zen', 'equilibre', 'rapide'];
-const QUICK_PROMPTS = [
-  'Quelle est la zone la plus calme ?',
-  'Quel est le meilleur moment pour partir ?',
-  'Quelle route est la plus sereine ?',
-];
-
-const VIEW_META = {
-  map: {
-    Icon: MapPinned,
-    description: 'Lecture spatiale des secteurs surveilles',
+const DEFAULT_PROFILE = {
+  mainZone: 'paris',
+  homeLabel: '',
+  workLabel: '',
+  transports: ['transit'],
+  morningDeparture: '08:00',
+  eveningReturn: '18:00',
+  objective: 'least_crowded',
+  crowdTolerance: 'low',
+  notifications: {
+    traffic: true,
+    schedule: true,
+    realtime: true,
   },
-  stats: {
-    Icon: TrendingUp,
-    description: 'Projection horaire et densite moyenne',
-  },
-  routes: {
-    Icon: RouteIcon,
-    description: 'Recommandations de parcours et profils',
-  },
-  alerts: {
-    Icon: BellRing,
-    description: 'Signaux a surveiller dans la zone active',
-  },
-  ai: {
-    Icon: Sparkles,
-    description: 'Copilote local branche sur le dashboard',
+  consents: {
+    history: false,
+    realtimeLocation: false,
   },
 };
 
-const PROFILE_LABELS = {
-  zen: 'Zen',
-  equilibre: 'Equilibre',
-  rapide: 'Rapide',
+const TRANSPORT_OPTIONS = [
+  { id: 'car', label: 'Voiture', Icon: CarFront },
+  { id: 'transit', label: 'Transport', Icon: TrainFront },
+  { id: 'bike', label: 'Velo', Icon: Bike },
+  { id: 'walking', label: 'Marche', Icon: Footprints },
+];
+
+const OBJECTIVE_OPTIONS = [
+  { id: 'fastest', label: 'Le plus rapide', shortLabel: 'Rapide' },
+  { id: 'least_crowded', label: 'Le moins frequente', shortLabel: 'Moins de foule' },
+  { id: 'eco', label: 'Le plus ecologique', shortLabel: 'Ecologique' },
+  { id: 'cheapest', label: 'Le moins cher', shortLabel: 'Economique' },
+];
+
+const CROWD_TOLERANCE_OPTIONS = [
+  { id: 'low', label: 'Faible', threshold: 0.34, shortLabel: 'Evite la foule' },
+  { id: 'medium', label: 'Moyenne', threshold: 0.55, shortLabel: 'Equilibre' },
+  { id: 'high', label: 'Elevee', threshold: 0.78, shortLabel: 'Flexible' },
+];
+
+const NOTIFICATION_OPTIONS = [
+  { id: 'traffic', label: 'Alertes trafic' },
+  { id: 'schedule', label: 'Suggestions horaires' },
+  { id: 'realtime', label: 'Changements en temps reel' },
+];
+
+const CONSENT_OPTIONS = [
+  { id: 'history', label: 'Historique des deplacements' },
+  { id: 'realtimeLocation', label: 'Geolocalisation en temps reel' },
+];
+
+const MOMENT_LABELS = {
+  morning: 'Aller',
+  evening: 'Retour',
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 const pct = (value) => `${Math.round((value || 0) * 100)}%`;
 const hourText = (value) => `${String(value).padStart(2, '0')}:00`;
 
-const buildInitials = (user) => {
-  const candidates = [user?.first_name, user?.last_name].filter(Boolean);
-  if (candidates.length) {
-    return candidates.map((part) => part.trim()[0]?.toUpperCase() || '').join('').slice(0, 2);
+function parseHour(value, fallback) {
+  if (!value || typeof value !== 'string') {
+    return fallback;
   }
-  return (user?.username || 'SP').slice(0, 2).toUpperCase();
-};
+  const [hour] = value.split(':');
+  const parsed = Number(hour);
+  return Number.isFinite(parsed) ? clamp(parsed, 0, 23) : fallback;
+}
 
-const greetingFor = (date) => {
+function greetingFor(date) {
   const hour = date.getHours();
   if (hour < 12) return 'Bonjour';
   if (hour < 18) return 'Bon apres-midi';
   return 'Bonsoir';
-};
+}
 
-const densityMeta = (density) => {
+function densityMeta(density) {
   if (density < 0.3) return { label: 'Fluide', tone: 'low' };
-  if (density < 0.6) return { label: 'Modere', tone: 'mid' };
+  if (density < 0.6) return { label: 'Moderee', tone: 'mid' };
   return { label: 'Dense', tone: 'high' };
-};
+}
 
-const projectionFor = (avgDensity, maxDensity, selectedHour) =>
-  [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].map((hour, index) => {
+function projectionFor(avgDensity, maxDensity, selectedHour) {
+  return [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].map((hour, index) => {
     const base = [0.22, 0.38, 0.7, 0.58, 0.46, 0.5, 0.68, 0.62, 0.48, 0.44, 0.56, 0.76, 0.88, 0.66, 0.5, 0.34][index];
     const focus = clamp(0.1 - Math.abs(hour - selectedHour) * 0.012, -0.05, 0.1);
-    return { hour, density: clamp(base * 0.62 + avgDensity * 0.48 + maxDensity * 0.14 + focus, 0.08, 0.96) };
+    return {
+      hour,
+      density: clamp(base * 0.62 + avgDensity * 0.48 + maxDensity * 0.14 + focus, 0.08, 0.96),
+    };
   });
+}
 
-function chartPath(points, width, height, padding) {
-  const max = Math.max(...points.map((point) => point.density), 0.01);
-  const coords = points.map((point, index) => ({
-    ...point,
-    x: padding + (index * (width - padding * 2)) / Math.max(points.length - 1, 1),
-    y: height - padding - (point.density / max) * (height - padding * 2),
-  }));
+function getProfileStorageKey(user) {
+  const identity = user?.id || user?.username || user?.email || 'guest';
+  return `${DASHBOARD_PROFILE_PREFIX}:${identity}`;
+}
 
+function mergeProfile(profile = {}) {
   return {
-    coords,
-    line: coords.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`).join(' '),
-    area: `${coords.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`).join(' ')} L${coords[coords.length - 1].x},${height - padding} L${coords[0].x},${height - padding} Z`,
+    ...DEFAULT_PROFILE,
+    ...profile,
+    transports: Array.isArray(profile.transports) && profile.transports.length ? profile.transports : DEFAULT_PROFILE.transports,
+    notifications: {
+      ...DEFAULT_PROFILE.notifications,
+      ...(profile.notifications || {}),
+    },
+    consents: {
+      ...DEFAULT_PROFILE.consents,
+      ...(profile.consents || {}),
+    },
   };
+}
+
+function readStoredProfile(user) {
+  try {
+    const raw = window.localStorage.getItem(getProfileStorageKey(user));
+    return raw ? mergeProfile(JSON.parse(raw)) : DEFAULT_PROFILE;
+  } catch {
+    return DEFAULT_PROFILE;
+  }
+}
+
+function persistProfile(user, profile) {
+  try {
+    window.localStorage.setItem(getProfileStorageKey(user), JSON.stringify(profile));
+  } catch {
+    // Ignore local persistence issues and keep the UI responsive.
+  }
+}
+
+function completionRatio(profile) {
+  const answers = [
+    Boolean(profile.homeLabel.trim()),
+    Boolean(profile.workLabel.trim()),
+    Array.isArray(profile.transports) && profile.transports.length > 0,
+    Boolean(profile.morningDeparture && profile.eveningReturn),
+    Boolean(profile.objective && profile.crowdTolerance),
+  ];
+  const completed = answers.filter(Boolean).length;
+  return {
+    completed,
+    total: answers.length,
+    percentage: Math.round((completed / answers.length) * 100),
+  };
+}
+
+function formatTransportList(values) {
+  if (!values?.length) {
+    return 'A definir';
+  }
+  return values
+    .map((value) => TRANSPORT_OPTIONS.find((option) => option.id === value)?.label || value)
+    .join(', ');
+}
+
+function findSuggestedSlot(projection, targetHour, threshold) {
+  const windowed = projection.filter((point) => Math.abs(point.hour - targetHour) <= 2);
+  const pool = windowed.length ? windowed : projection;
+  const matchingThreshold = pool.filter((point) => point.density <= threshold);
+  const sortByDistance = (left, right) =>
+    Math.abs(left.hour - targetHour) - Math.abs(right.hour - targetHour) || left.density - right.density;
+  if (matchingThreshold.length) {
+    return [...matchingThreshold].sort(sortByDistance)[0];
+  }
+  return [...pool].sort((left, right) => left.density - right.density || sortByDistance(left, right))[0] || null;
+}
+
+function buildMomentRecommendation({ label, targetHour, targetSlot, suggestedSlot, threshold, objectiveLabel }) {
+  if (!targetSlot) {
+    return {
+      headline: `${label}: donnees en attente`,
+      text: 'SafePath attend la prochaine projection pour recommander un horaire.',
+    };
+  }
+  const targetDensity = targetSlot.density || 0;
+  const status = densityMeta(targetDensity);
+  const suggestedHour = suggestedSlot?.hour ?? targetHour;
+  const shouldMove = targetDensity > threshold && suggestedHour !== targetHour;
+  if (shouldMove) {
+    const direction = suggestedHour < targetHour ? 'plus tot' : 'plus tard';
+    return {
+      headline: `${label}: trafic ${status.label.toLowerCase()} vers ${hourText(targetHour)}`,
+      text: `Pour garder un trajet ${objectiveLabel.toLowerCase()}, partez ${direction}, idealement vers ${hourText(suggestedHour)}.`,
+    };
+  }
+  if (targetDensity > threshold) {
+    return {
+      headline: `${label}: creneau charge mais gerable`,
+      text: `Le pic reste limite autour de ${hourText(targetHour)}. Gardez ${objectiveLabel.toLowerCase()} comme priorite et surveillez les alertes.`,
+    };
+  }
+  return {
+    headline: `${label}: bonne fenetre a ${hourText(targetHour)}`,
+    text: `La densite reste compatible avec votre tolerance. Vous pouvez garder votre depart habituel.`,
+  };
+}
+
+function guessZoneId(zones, ...texts) {
+  const haystack = texts.join(' ').toLowerCase();
+  const match = zones.find((zone) => {
+    const label = String(zone.label || zone.id || '').toLowerCase();
+    const id = String(zone.id || '').toLowerCase();
+    return label && (haystack.includes(label) || haystack.includes(id));
+  });
+  return match?.id || null;
+}
+
+function buildUserPreferencePayload(profile, user) {
+  const tolerance = CROWD_TOLERANCE_OPTIONS.find((option) => option.id === profile.crowdTolerance) || CROWD_TOLERANCE_OPTIONS[0];
+  const prefersTransit = profile.transports.includes('transit');
+  const likesWalking = profile.transports.includes('walking');
+  return {
+    user_id: user?.id ? `auth_${user.id}` : user?.username ? `member_${user.username}` : 'dashboard_guest',
+    max_crowd_density: tolerance.threshold,
+    avoid_main_roads: profile.objective !== 'fastest',
+    prefer_parks: profile.objective === 'eco' || profile.crowdTolerance === 'low',
+    noise_sensitivity: profile.crowdTolerance === 'low' ? 8 : profile.crowdTolerance === 'medium' ? 5 : 2,
+    walking_speed: likesWalking ? 1.55 : 1.35,
+    consider_public_transport: prefersTransit,
+    transport_factor: profile.objective === 'cheapest' ? 0.35 : profile.objective === 'eco' ? 0.28 : 0.15,
+  };
+}
+
+function formatUpdateTime(value, fallbackDate) {
+  const date = value ? new Date(value) : fallbackDate;
+  if (Number.isNaN(date.getTime())) {
+    return 'Maintenant';
+  }
+  return new Intl.DateTimeFormat('fr-FR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }
 
 export default function Dashboard() {
   const { user } = useAuth();
   const [zones, setZones] = useState(ZONES_FALLBACK);
-  const [selectedZone, setSelectedZone] = useState('paris');
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [profileHydrated, setProfileHydrated] = useState(false);
+  const [selectedMoment, setSelectedMoment] = useState(() => (new Date().getHours() >= 14 ? 'evening' : 'morning'));
   const [zoneLabel, setZoneLabel] = useState('Paris');
-  const [selectedHour, setSelectedHour] = useState(new Date().getHours());
-  const [gridSize, setGridSize] = useState(5);
-  const [predictionForHour, setPredictionForHour] = useState(new Date().getHours());
-  const [sourceDescription, setSourceDescription] = useState('');
-  const [updatedAt, setUpdatedAt] = useState(null);
   const [predictions, setPredictions] = useState([]);
   const [calmZones, setCalmZones] = useState([]);
+  const [sourceDescription, setSourceDescription] = useState('');
+  const [updatedAt, setUpdatedAt] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [userLocation, setUserLocation] = useState(null);
-  const [view, setView] = useState('map');
-  const [profile, setProfile] = useState('zen');
-  const [selectedRouteId, setSelectedRouteId] = useState('zen');
-  const [dismissedAlerts, setDismissedAlerts] = useState([]);
-  const [assistantMessages, setAssistantMessages] = useState([
-    {
-      role: 'assistant',
-      text: 'Je lis les donnees du dashboard SafePath. Demandez une zone calme, une heure de depart ou une route.',
-    },
-  ]);
-  const [assistantInput, setAssistantInput] = useState('');
-  const [assistantLoading, setAssistantLoading] = useState(false);
   const [liveTime, setLiveTime] = useState(new Date());
-  const assistantRef = useRef(null);
-  const replyTimerRef = useRef(null);
+  const syncTimerRef = useRef(null);
 
   useEffect(() => {
-    axios.get('/api/zones/').then((res) => {
-      if (res.data?.zones?.length) setZones(res.data.zones);
-    }).catch(() => {});
+    api.get('/zones/')
+      .then((response) => {
+        if (response.data?.zones?.length) {
+          setZones(response.data.zones);
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setProfile(readStoredProfile(user));
+    setProfileHydrated(true);
+  }, [user?.email, user?.id, user?.username]);
+
+  useEffect(() => {
+    if (!profileHydrated) {
+      return;
+    }
+    persistProfile(user, profile);
+  }, [profile, profileHydrated, user]);
+
+  useEffect(() => () => syncTimerRef.current && window.clearTimeout(syncTimerRef.current), []);
+
+  useEffect(() => {
+    if (!profileHydrated) {
+      return undefined;
+    }
+    syncTimerRef.current = window.setTimeout(async () => {
+      try {
+        await api.post('/user-preferences/', buildUserPreferencePayload(profile, user));
+      } catch {
+        // The dashboard still works even if backend preference sync is unavailable.
+      }
+    }, 700);
+    return () => {
+      if (syncTimerRef.current) {
+        window.clearTimeout(syncTimerRef.current);
+      }
+    };
+  }, [profile, profileHydrated, user]);
+
+  useEffect(() => {
+    const guessedZone = guessZoneId(zones, profile.homeLabel, profile.workLabel);
+    if (guessedZone && guessedZone !== profile.mainZone) {
+      setProfile((current) => ({ ...current, mainZone: guessedZone }));
+    }
+  }, [profile.homeLabel, profile.mainZone, profile.workLabel, zones]);
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -172,568 +352,469 @@ export default function Dashboard() {
     return () => window.clearInterval(intervalId);
   }, []);
 
-  useEffect(() => () => replyTimerRef.current && window.clearTimeout(replyTimerRef.current), []);
-
-  useEffect(() => {
-    if (assistantRef.current) assistantRef.current.scrollTop = assistantRef.current.scrollHeight;
-  }, [assistantMessages, assistantLoading]);
+  const focusHour = useMemo(
+    () =>
+      selectedMoment === 'morning'
+        ? parseHour(profile.morningDeparture, new Date().getHours())
+        : parseHour(profile.eveningReturn, new Date().getHours()),
+    [profile.eveningReturn, profile.morningDeparture, selectedMoment]
+  );
 
   const fetchPredictions = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [predictionRes, calmRes] = await Promise.all([
-        axios.get('/api/density-prediction/', { params: { zone: selectedZone, hour: selectedHour, grid: gridSize } }),
-        axios.get('/api/calm-zones/').catch(() => ({ data: { calm_zones: [] } })),
+      const [predictionResponse, calmResponse] = await Promise.all([
+        api.get('/density-prediction/', {
+          params: {
+            zone: profile.mainZone,
+            hour: focusHour,
+            grid: 5,
+          },
+        }),
+        api.get('/calm-zones/').catch(() => ({ data: { calm_zones: [] } })),
       ]);
-
-      setPredictions(predictionRes.data?.predictions || []);
-      setZoneLabel(predictionRes.data?.zone_label || zones.find((zone) => zone.id === selectedZone)?.label || selectedZone);
-      setUpdatedAt(predictionRes.data?.updated_at || null);
-      setSourceDescription(predictionRes.data?.source || '');
-      setPredictionForHour(predictionRes.data?.prediction_for_hour ?? predictionRes.data?.hour ?? selectedHour);
-      setCalmZones(calmRes.data?.calm_zones || []);
-      setDismissedAlerts([]);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Erreur de chargement des predictions');
+      const zoneName =
+        predictionResponse.data?.zone_label ||
+        zones.find((zone) => zone.id === profile.mainZone)?.label ||
+        profile.mainZone;
+      setPredictions(predictionResponse.data?.predictions || []);
+      setZoneLabel(zoneName);
+      setSourceDescription(predictionResponse.data?.source || '');
+      setUpdatedAt(predictionResponse.data?.updated_at || null);
+      setCalmZones(calmResponse.data?.calm_zones || []);
+    } catch (requestError) {
+      setError(requestError.response?.data?.error || 'Impossible de charger les previsions du dashboard.');
       setPredictions([]);
       setCalmZones([]);
     } finally {
       setLoading(false);
     }
-  }, [gridSize, selectedHour, selectedZone, zones]);
+  }, [focusHour, profile.mainZone, zones]);
 
   useEffect(() => {
     fetchPredictions();
   }, [fetchPredictions]);
 
-  const sectors = predictions.map((prediction, index) => ({
-    ...prediction,
-    id: `${selectedZone}-${index}`,
-    zoneLabel: prediction.zone_label || `${zoneLabel} secteur ${index + 1}`,
-  }));
+  const sectors = useMemo(
+    () =>
+      predictions.map((prediction, index) => ({
+        ...prediction,
+        id: `${profile.mainZone}-${index}`,
+        zoneLabel: prediction.zone_label || `${zoneLabel} secteur ${index + 1}`,
+      })),
+    [predictions, profile.mainZone, zoneLabel]
+  );
 
-  const densityData = sectors
-    .filter((sector) => sector.location?.lat != null && sector.location?.lng != null)
-    .map((sector) => ({ location: sector.location, density: sector.density, confidence: sector.confidence || 0.7 }));
+  const densityData = useMemo(
+    () =>
+      sectors
+        .filter((sector) => sector.location?.lat != null && sector.location?.lng != null)
+        .map((sector) => ({
+          location: sector.location,
+          density: sector.density,
+          confidence: sector.confidence || 0.7,
+        })),
+    [sectors]
+  );
 
-  const avgDensity = sectors.length ? sectors.reduce((sum, sector) => sum + (sector.density || 0), 0) / sectors.length : 0;
+  const avgDensity = sectors.length
+    ? sectors.reduce((sum, sector) => sum + (sector.density || 0), 0) / sectors.length
+    : 0;
   const maxDensity = sectors.length ? Math.max(...sectors.map((sector) => sector.density || 0)) : 0;
   const bestSector = [...sectors].sort((left, right) => (left.density || 0) - (right.density || 0))[0];
-  const hottestSector = [...sectors].sort((left, right) => (right.density || 0) - (left.density || 0))[0];
-  const projection = projectionFor(avgDensity, maxDensity, selectedHour);
+  const projection = projectionFor(avgDensity, maxDensity, focusHour);
   const peakSlot = [...projection].sort((left, right) => right.density - left.density)[0];
-  const calmSlot = [...projection].sort((left, right) => left.density - right.density)[0];
-  const lowCount = sectors.filter((sector) => sector.density < 0.3).length;
-  const midCount = sectors.filter((sector) => sector.density >= 0.3 && sector.density < 0.6).length;
-  const highCount = sectors.filter((sector) => sector.density >= 0.6).length;
+  const objective = OBJECTIVE_OPTIONS.find((option) => option.id === profile.objective) || OBJECTIVE_OPTIONS[1];
+  const crowdTolerance =
+    CROWD_TOLERANCE_OPTIONS.find((option) => option.id === profile.crowdTolerance) || CROWD_TOLERANCE_OPTIONS[0];
+  const progress = completionRatio(profile);
+  const morningHour = parseHour(profile.morningDeparture, 8);
+  const eveningHour = parseHour(profile.eveningReturn, 18);
+  const morningSlot = projection.find((point) => point.hour === morningHour) || projection[0];
+  const eveningSlot = projection.find((point) => point.hour === eveningHour) || projection[projection.length - 1];
+  const morningSuggestion = findSuggestedSlot(projection, morningHour, crowdTolerance.threshold);
+  const eveningSuggestion = findSuggestedSlot(projection, eveningHour, crowdTolerance.threshold);
 
-  const routes = [
+  const tripMoments = [
     {
-      id: 'zen',
-      label: 'Route Zen',
-      eta: `${16 + Math.round(avgDensity * 6)} min`,
-      crowd: clamp(Math.round(avgDensity * 100) - 18, 8, 75),
-      score: clamp(96 - Math.round(maxDensity * 18), 70, 99),
-      note: `Contourne ${hottestSector?.zoneLabel || 'les zones chargees'} et passe pres de ${calmZones[0]?.name || 'zones calmes'}.`,
+      id: 'morning',
+      label: 'Aller',
+      time: profile.morningDeparture,
+      slot: morningSlot,
+      suggestion: morningSuggestion,
+      recommendation: buildMomentRecommendation({
+        label: 'Aller',
+        targetHour: morningHour,
+        targetSlot: morningSlot,
+        suggestedSlot: morningSuggestion,
+        threshold: crowdTolerance.threshold,
+        objectiveLabel: objective.label,
+      }),
     },
     {
-      id: 'equilibre',
-      label: 'Route Equilibre',
-      eta: `${13 + Math.round(avgDensity * 5)} min`,
-      crowd: clamp(Math.round(avgDensity * 100) - 6, 16, 84),
-      score: clamp(88 - Math.round(avgDensity * 12), 62, 95),
-      note: `Compromis entre temps et confort pour ${hourText(selectedHour)}.`,
-    },
-    {
-      id: 'rapide',
-      label: 'Route Rapide',
-      eta: `${11 + Math.round(avgDensity * 4)} min`,
-      crowd: clamp(Math.round(maxDensity * 100) - 2, 22, 94),
-      score: clamp(78 - Math.round(maxDensity * 10), 54, 88),
-      note: 'Trajet direct, mais exposition plus forte aux pics de foule.',
+      id: 'evening',
+      label: 'Retour',
+      time: profile.eveningReturn,
+      slot: eveningSlot,
+      suggestion: eveningSuggestion,
+      recommendation: buildMomentRecommendation({
+        label: 'Retour',
+        targetHour: eveningHour,
+        targetSlot: eveningSlot,
+        suggestedSlot: eveningSuggestion,
+        threshold: crowdTolerance.threshold,
+        objectiveLabel: objective.label,
+      }),
     },
   ];
 
-  const selectedRoute = routes.find((route) => route.id === selectedRouteId) || routes[0];
-  const alerts = [
-    {
-      id: 'peak',
-      tone: 'high',
-      title: 'Pic de densite',
-      text: `Le point le plus charge atteint ${pct(maxDensity)}${hottestSector ? ` sur ${hottestSector.zoneLabel}` : ''}.`,
-    },
-    {
-      id: 'calm',
-      tone: 'low',
-      title: 'Fenetre calme',
-      text: `Le meilleur creux projete arrive vers ${hourText(calmSlot?.hour || selectedHour)}.`,
-    },
-    {
-      id: 'zone',
-      tone: 'mid',
-      title: 'Zone refuge',
-      text: calmZones[0] ? `${calmZones[0].name} reste disponible comme point de respiration.` : 'Aucune zone refuge supplementaire detectee.',
-    },
-  ].filter((alert) => !dismissedAlerts.includes(alert.id));
-
-  const chart = chartPath(projection, 720, 220, 28);
-
-  const replyFor = (message) => {
-    const text = message.toLowerCase();
-    if (text.includes('calme') || text.includes('zone')) {
-      return bestSector
-        ? `${bestSector.zoneLabel} est le secteur le plus calme, autour de ${pct(bestSector.density)}.`
-        : `La charge moyenne actuelle sur ${zoneLabel} est de ${pct(avgDensity)}.`;
-    }
-    if (text.includes('heure') || text.includes('partir') || text.includes('pointe')) {
-      return `Le prochain pic est attendu vers ${hourText(peakSlot?.hour || selectedHour)}. Si vous pouvez decaler, ciblez ${hourText(calmSlot?.hour || selectedHour)}.`;
-    }
-    return `${selectedRoute.label} est mon meilleur choix du moment: ${selectedRoute.eta}, charge estimee ${selectedRoute.crowd}% et score ${selectedRoute.score}/100.`;
-  };
-
-  const sendAssistant = (message) => {
-    const clean = message.trim();
-    if (!clean || assistantLoading) return;
-    setAssistantMessages((current) => [...current, { role: 'user', text: clean }]);
-    setAssistantInput('');
-    setAssistantLoading(true);
-    replyTimerRef.current = window.setTimeout(() => {
-      setAssistantMessages((current) => [...current, { role: 'assistant', text: replyFor(clean) }]);
-      setAssistantLoading(false);
-    }, 500);
-  };
-
-  const mood = densityMeta(avgDensity);
-  const displayName = user?.first_name?.trim() || user?.username || 'Explorateur';
-  const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(' ').trim();
-  const userHeadline = fullName || user?.username || 'Membre SafePath';
-  const userInitials = buildInitials(user);
+  const activeTrip = tripMoments.find((moment) => moment.id === selectedMoment) || tripMoments[0];
+  const mood = densityMeta(activeTrip?.slot?.density || avgDensity);
+  const displayName = user?.first_name?.trim() || user?.username || 'voyageur';
   const greeting = greetingFor(liveTime);
-  const selectedViewMeta = VIEW_META[view];
-  const personalizedInsights = [
-    {
-      label: 'Zone prioritaire',
-      value: bestSector?.zoneLabel || zoneLabel,
-      detail: bestSector ? `${pct(bestSector.density)} de charge` : 'En attente de donnees',
-    },
-    {
-      label: 'Depart conseille',
-      value: hourText(calmSlot?.hour || selectedHour),
-      detail: `${pct(calmSlot?.density || avgDensity)} projetes`,
-    },
-    {
-      label: 'Profil actif',
-      value: PROFILE_LABELS[profile] || profile,
-      detail: selectedRoute?.label || 'Aucun trajet',
-    },
+  const enabledNotificationCount = Object.values(profile.notifications).filter(Boolean).length;
+  const enabledConsents = Object.values(profile.consents).filter(Boolean).length;
+  const heroRouteLabel = `${profile.homeLabel || 'Domicile'} -> ${profile.workLabel || 'Travail / ecole'}`;
+  const nextCalmZone = calmZones[0];
+  const mapHighlight = bestSector?.location
+    ? { lat: bestSector.location.lat, lng: bestSector.location.lng, name: bestSector.zoneLabel }
+    : null;
+
+  const smartSuggestions = [
+    activeTrip?.recommendation?.text,
+    nextCalmZone
+      ? `${nextCalmZone.name} reste une zone refuge si vous avez besoin d'une pause sur le trajet.`
+      : 'Aucune zone refuge supplementaire n est remontee pour le moment.',
+    `Mode privilegie : ${formatTransportList(profile.transports)}.`,
+    enabledNotificationCount
+      ? `${enabledNotificationCount} type(s) de notification active(s) pour vous prevenir au bon moment.`
+      : 'Aucune notification active, pensez a en garder au moins une pour les alertes utiles.',
   ];
+
+  const updateField = (field, value) => {
+    setProfile((current) => ({ ...current, [field]: value }));
+  };
+
+  const toggleTransport = (transportId) => {
+    setProfile((current) => {
+      const alreadySelected = current.transports.includes(transportId);
+      const nextTransports = alreadySelected
+        ? current.transports.filter((item) => item !== transportId)
+        : [...current.transports, transportId];
+      return {
+        ...current,
+        transports: nextTransports.length ? nextTransports : current.transports,
+      };
+    });
+  };
+
+  const toggleNestedValue = (section, key) => {
+    setProfile((current) => ({
+      ...current,
+      [section]: {
+        ...current[section],
+        [key]: !current[section][key],
+      },
+    }));
+  };
 
   return (
-    <div className="dashboard-page dashboard-room dashboard-member-room">
-      <div className="dashboard-member-shell">
-        <aside className="dashboard-member-sidebar">
-          <div className="member-brand">
-            <div className="member-brand-mark">SP</div>
-            <div>
-              <span>SafePath</span>
-              <strong>Mon espace</strong>
+    <div className="dashboard-page dashboard-room dashboard-personal-page">
+      <section className="dashboard-personal-hero">
+        <div className="dashboard-personal-hero-main">
+          <div className="dashboard-personal-kicker">
+            <Sparkles size={15} />
+            Dashboard personnalise
+          </div>
+          <h1>{greeting}, {displayName}</h1>
+          <p>
+            SafePath adapte maintenant le dashboard a vos lieux cles, vos habitudes de deplacement et votre tolerance a la
+            foule, pour vous donner une recommandation utile des la connexion.
+          </p>
+          <div className="dashboard-hero-pills">
+            <span><MapPin size={14} /> {zoneLabel}</span>
+            <span><Gauge size={14} /> {objective.shortLabel}</span>
+            <span><ShieldCheck size={14} /> {crowdTolerance.shortLabel}</span>
+          </div>
+          <div className="dashboard-hero-grid">
+            <article className="dashboard-hero-stat">
+              <span>Ton trajet habituel</span>
+              <strong>{heroRouteLabel}</strong>
+              <small>{formatTransportList(profile.transports)}</small>
+            </article>
+            <article className={`dashboard-hero-stat tone-${mood.tone}`}>
+              <span>Densite prevue aujourd hui</span>
+              <strong>{pct(activeTrip?.slot?.density || avgDensity)}</strong>
+              <small>{activeTrip?.label} vers {activeTrip?.time || hourText(focusHour)}</small>
+            </article>
+            <article className="dashboard-hero-stat tone-accent">
+              <span>Recommandation rapide</span>
+              <strong>{activeTrip?.suggestion ? hourText(activeTrip.suggestion.hour) : hourText(focusHour)}</strong>
+              <small>{activeTrip?.recommendation?.headline}</small>
+            </article>
+          </div>
+        </div>
+
+        <aside className="dashboard-personal-hero-side">
+          <div className="dashboard-side-card">
+            <span className="dashboard-side-label">Onboarding rapide</span>
+            <strong>{progress.completed}/{progress.total} questions renseignees</strong>
+            <div className="dashboard-progress">
+              <span style={{ width: `${progress.percentage}%` }} />
             </div>
+            <p>
+              Quelques infos suffisent pour personnaliser trajets, previsions et horaires conseilles sans alourdir
+              l inscription.
+            </p>
           </div>
 
-          <section className="member-profile-card">
-            <div className="member-avatar">{userInitials}</div>
-            <div className="member-profile-copy">
-              <span className="member-kicker">Espace connecte</span>
-              <h2>{userHeadline}</h2>
-              <p>
-                {greeting}, {displayName}. Votre tableau de bord regroupe vos signaux, vos meilleures
-                fenetres de depart et vos actions rapides.
-              </p>
-            </div>
-          </section>
-
-          <section className="member-sidebar-section">
-            <span className="member-section-label">Navigation du dashboard</span>
-            <div className="member-view-nav">
-              {VIEWS.map((item) => {
-                const Icon = VIEW_META[item.id]?.Icon || Activity;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`member-view-btn ${view === item.id ? 'active' : ''}`}
-                    onClick={() => setView(item.id)}
-                  >
-                    <Icon size={16} />
-                    <div>
-                      <strong>{item.label}</strong>
-                      <span>{VIEW_META[item.id]?.description}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="member-sidebar-section">
-            <span className="member-section-label">Acces rapides</span>
-            <div className="member-shortcuts">
-              <Link to="/trajet" className="member-shortcut">
+          <div className="dashboard-side-card">
+            <span className="dashboard-side-label">Actions rapides</span>
+            <div className="dashboard-quick-links">
+              <Link to="/trajet" className="dashboard-quick-link">
                 <RouteIcon size={16} />
-                <div>
-                  <strong>Nouveau trajet</strong>
-                  <span>Basculer vers le calculateur d itineraire</span>
-                </div>
-                <ArrowRight size={14} />
+                <span>Calculer un trajet</span>
               </Link>
-              <Link to="/exploration" className="member-shortcut">
-                <MapPinned size={16} />
-                <div>
-                  <strong>Explorer la carte</strong>
-                  <span>Ouvrir la vue ville et lieux</span>
-                </div>
-                <ArrowRight size={14} />
+              <Link to="/exploration" className="dashboard-quick-link">
+                <LocateFixed size={16} />
+                <span>Ouvrir la carte</span>
               </Link>
             </div>
-          </section>
-
-          <section className="member-sidebar-section member-sidebar-surface">
-            <span className="member-section-label">Mon resume</span>
-            <div className="member-mini-stack">
-              <div className="member-mini-card">
-                <span>Zone suivie</span>
-                <strong>{zoneLabel}</strong>
-              </div>
-              <div className="member-mini-card">
-                <span>Route conseillee</span>
-                <strong>{selectedRoute?.label || 'Zen'}</strong>
-              </div>
-              <div className="member-mini-card">
-                <span>Mise a jour</span>
-                <strong>
-                  {updatedAt
-                    ? new Date(updatedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-                    : liveTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                </strong>
-              </div>
-            </div>
-          </section>
+            <small>Mise a jour {formatUpdateTime(updatedAt, liveTime)}</small>
+          </div>
         </aside>
+      </section>
 
-        <main className="dashboard-member-main">
-          <section className="member-overview-grid">
-            <article className="member-hero-panel">
-              <div className="dashboard-badge">
-                <Gauge size={14} /> Dashboard personnel SafePath
-              </div>
-              <h1>{greeting}, {displayName}. Votre ville est sous controle.</h1>
-              <p>
-                Cette interface connectee est differente du site public: elle met en avant votre zone active,
-                vos habitudes de trajet et les indicateurs les plus utiles pour partir au bon moment.
-              </p>
+      {error && (
+        <div className="dashboard-inline-error">
+          <TriangleAlert size={16} />
+          <span>{error}</span>
+        </div>
+      )}
 
-              <div className="member-summary-grid">
-                <article className={`hero-stat tone-${mood.tone}`}>
-                  <span>Charge moyenne</span>
-                  <strong>{pct(avgDensity)}</strong>
-                  <small>{mood.label}</small>
-                </article>
-                <article className="hero-stat tone-high">
-                  <span>Point chaud</span>
-                  <strong>{pct(maxDensity)}</strong>
-                  <small>{hottestSector?.zoneLabel || 'En attente'}</small>
-                </article>
-                <article className="hero-stat tone-low">
-                  <span>Fenetre recommandee</span>
-                  <strong>{hourText(calmSlot?.hour || selectedHour)}</strong>
-                  <small>{pct(calmSlot?.density || avgDensity)}</small>
-                </article>
-              </div>
-
-              <div className="member-personal-grid">
-                {personalizedInsights.map((insight) => (
-                  <article key={insight.label} className="member-personal-card">
-                    <span>{insight.label}</span>
-                    <strong>{insight.value}</strong>
-                    <small>{insight.detail}</small>
-                  </article>
-                ))}
-              </div>
-            </article>
-
-            <aside className="member-radar-panel">
-              <div className="dashboard-live">
-                <span className="live-dot" />
-                {error ? 'Signal degrade' : `Projection ${hourText(predictionForHour)}`}
-              </div>
-              <div className="radar-ring">
-                <div>
-                  <span>Ville active</span>
-                  <strong>{zoneLabel}</strong>
-                  <small>{liveTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</small>
-                </div>
-              </div>
-              <div className="dashboard-meta">
-                <div><span>Source</span><strong>{sourceDescription || 'Historique + temps reel'}</strong></div>
-                <div><span>Grille</span><strong>{gridSize} x {gridSize}</strong></div>
-                <div><span>Vue active</span><strong>{selectedViewMeta?.description || 'Pilotage live'}</strong></div>
-              </div>
-            </aside>
-          </section>
-
-          <section className="dashboard-toolbar member-toolbar-card">
-        <label className="control">
-          <span><MapPinned size={15} /> Ville</span>
-          <select value={selectedZone} onChange={(event) => setSelectedZone(event.target.value)}>
-            {zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}
-          </select>
-        </label>
-        <label className="control wide">
-          <span><Clock3 size={15} /> Heure cible</span>
-          <div className="range-wrap">
-            <input type="range" min="0" max="23" value={selectedHour} onChange={(event) => setSelectedHour(Number(event.target.value))} />
-            <strong>{hourText(selectedHour)}</strong>
-          </div>
-        </label>
-        <label className="control">
-          <span><Layers size={15} /> Resolution</span>
-          <select value={gridSize} onChange={(event) => setGridSize(Number(event.target.value))}>
-            <option value="3">3 x 3</option>
-            <option value="5">5 x 5</option>
-            <option value="7">7 x 7</option>
-            <option value="10">10 x 10</option>
-          </select>
-        </label>
-        <button className="refresh" onClick={fetchPredictions} disabled={loading}>
-          <RefreshCw size={16} className={loading ? 'spin' : ''} />
-          {loading ? 'Actualisation...' : 'Actualiser'}
-        </button>
-          </section>
-
-          <div className="toolbar-info member-status-strip">
-        <span><LocateFixed size={14} /> {bestSector ? `Zone la plus calme: ${bestSector.zoneLabel} a ${pct(bestSector.density)}` : 'En attente de secteurs analyses'}</span>
-        <span><ShieldCheck size={14} /> {sourceDescription || 'Analyse predictive melangeant historique et temps reel'}</span>
-          </div>
-
-          {error && <div className="dashboard-error"><TriangleAlert size={16} /> {error}</div>}
-
-          <section className="dashboard-panel-shell member-panel-shell">
-        {view === 'map' && (
-          <div className="split two-col">
-            <article className="card">
-              <div className="card-head">
-                <div>
-                  <span className="eyebrow">Cartographie live</span>
-                  <h2>{zoneLabel} sous surveillance</h2>
-                </div>
-                <span className="pill">{sectors.length} secteurs</span>
-              </div>
-              <div className="map-stage">
-                <MapComponent route={null} userLocation={userLocation} densityData={densityData} />
-                <div className="overlay top-left">Prediction {hourText(predictionForHour)}</div>
-                <div className="overlay top-right live"><span className="live-dot" /> LIVE</div>
-                <div className="overlay bottom-left">Fluide - Modere - Dense</div>
-              </div>
-            </article>
-
-            <aside className="card">
-              <div className="card-head">
-                <div>
-                  <span className="eyebrow">Secteurs</span>
-                  <h2>Lecture rapide</h2>
-                </div>
-                <span className="pill low">{lowCount} apaises</span>
-              </div>
-              <div className="stack">
-                {sectors.length === 0 && <div className="empty">Aucune prediction detaillee.</div>}
-                {sectors.map((sector) => {
-                  const meta = densityMeta(sector.density || 0);
-                  return (
-                    <article key={sector.id} className={`sector-card ${meta.tone}`}>
-                      <div className="sector-top">
-                        <div>
-                          <strong>{sector.zoneLabel}</strong>
-                          <span>{meta.label}</span>
-                        </div>
-                        <strong>{pct(sector.density)}</strong>
-                      </div>
-                      <div className="bar"><span style={{ width: `${Math.round((sector.density || 0) * 100)}%` }} /></div>
-                    </article>
-                  );
-                })}
-              </div>
-            </aside>
-          </div>
-        )}
-
-        {view === 'stats' && (
-          <div className="stack">
-            <div className="stats-grid">
-              <article className="stat-card"><span>Moyenne</span><strong>{pct(avgDensity)}</strong><small>{sectors.length} secteurs</small></article>
-              <article className="stat-card"><span>Zones denses</span><strong>{highCount}</strong><small>au-dessus de 60%</small></article>
-              <article className="stat-card"><span>Zones fluides</span><strong>{lowCount}</strong><small>sous 30%</small></article>
-              <article className="stat-card"><span>Meilleure heure</span><strong>{hourText(calmSlot?.hour || selectedHour)}</strong><small>{pct(calmSlot?.density || avgDensity)}</small></article>
+      <div className="dashboard-personal-layout">
+        <section className="dashboard-panel-card dashboard-setup-card">
+          <div className="dashboard-panel-head">
+            <div>
+              <span className="dashboard-eyebrow">Configuration personnelle</span>
+              <h2>Votre espace utile en 5 reponses</h2>
             </div>
-            <article className="card">
-              <div className="card-head">
-                <div>
-                  <span className="eyebrow">Projection journaliere</span>
-                  <h2>Densite estimee par heure</h2>
-                </div>
-                <span className="pill">{hourText(peakSlot?.hour || selectedHour)}</span>
-              </div>
-              <svg viewBox="0 0 720 220" className="chart">
-                <defs>
-                  <linearGradient id="dashArea" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="rgba(45,157,120,0.35)" />
-                    <stop offset="100%" stopColor="rgba(45,157,120,0.03)" />
-                  </linearGradient>
-                </defs>
-                {[0, 0.25, 0.5, 0.75, 1].map((step) => <line key={step} x1="28" y1={220 - 28 - step * 164} x2="692" y2={220 - 28 - step * 164} className="grid-line" />)}
-                <path d={chart.area} fill="url(#dashArea)" />
-                <path d={chart.line} className="chart-line" />
-                {chart.coords.map((point) => (
-                  <g key={point.hour}>
-                    <circle cx={point.x} cy={point.y} r={point.hour === selectedHour ? 5 : 4} className={point.hour === selectedHour ? 'chart-dot current' : 'chart-dot'} />
-                    <text x={point.x} y="212" textAnchor="middle">{String(point.hour).padStart(2, '0')}h</text>
-                  </g>
-                ))}
-              </svg>
-            </article>
-            <div className="stats-grid">
-              <article className="stat-card tone-low"><span>Fluide</span><strong>{lowCount}</strong><small>zones sous 30%</small></article>
-              <article className="stat-card tone-mid"><span>Modere</span><strong>{midCount}</strong><small>zones entre 30% et 60%</small></article>
-              <article className="stat-card tone-high"><span>Dense</span><strong>{highCount}</strong><small>zones au-dessus de 60%</small></article>
-            </div>
+            <span className="dashboard-panel-pill"><Check size={14} /> {progress.percentage}% complete</span>
           </div>
-        )}
-
-        {view === 'routes' && (
-          <div className="split two-col">
-            <article className="card">
-              <div className="card-head">
-                <div>
-                  <span className="eyebrow">Routage recommande</span>
-                  <h2>Trois styles de trajet</h2>
-                </div>
-                <span className="pill">{hourText(selectedHour)}</span>
+          <div className="dashboard-checklist">
+            <span className={profile.homeLabel ? 'done' : ''}>1. Domicile</span>
+            <span className={profile.workLabel ? 'done' : ''}>2. Lieu frequent</span>
+            <span className={profile.transports.length ? 'done' : ''}>3. Transport</span>
+            <span className={profile.morningDeparture && profile.eveningReturn ? 'done' : ''}>4. Horaires</span>
+            <span className={profile.objective && profile.crowdTolerance ? 'done' : ''}>5. Foule et priorite</span>
+          </div>
+          <div className="dashboard-form-grid">
+            <label className="dashboard-field">
+              <span>Zone suivie</span>
+              <select value={profile.mainZone} onChange={(event) => updateField('mainZone', event.target.value)}>
+                {zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.label}</option>)}
+              </select>
+            </label>
+            <label className="dashboard-field">
+              <span>Domicile</span>
+              <div className="dashboard-input-shell">
+                <Home size={16} />
+                <input type="text" value={profile.homeLabel} onChange={(event) => updateField('homeLabel', event.target.value)} placeholder="Ex: Paris 11e" />
               </div>
-              <div className="profiles">
-                {PROFILES.map((item) => (
-                  <button key={item} className={profile === item ? 'active' : ''} onClick={() => { setProfile(item); setSelectedRouteId(item); }}>
-                    {item}
+            </label>
+            <label className="dashboard-field">
+              <span>Travail / ecole</span>
+              <div className="dashboard-input-shell">
+                <BriefcaseBusiness size={16} />
+                <input type="text" value={profile.workLabel} onChange={(event) => updateField('workLabel', event.target.value)} placeholder="Ex: La Defense" />
+              </div>
+            </label>
+            <div className="dashboard-field dashboard-field-full">
+              <span>Moyens de transport preferes</span>
+              <div className="dashboard-choice-row">
+                {TRANSPORT_OPTIONS.map(({ id, label, Icon }) => (
+                  <button key={id} type="button" className={`dashboard-choice-chip ${profile.transports.includes(id) ? 'active' : ''}`} onClick={() => toggleTransport(id)}>
+                    <Icon size={16} />
+                    {label}
                   </button>
                 ))}
               </div>
-              <div className="stack">
-                {routes.map((route) => (
-                  <button key={route.id} className={`route-card ${selectedRoute?.id === route.id ? 'selected' : ''}`} onClick={() => setSelectedRouteId(route.id)}>
-                    <div className="route-top">
-                      <div><strong>{route.label}</strong><span>{route.eta}</span></div>
-                      <strong>{route.score}/100</strong>
-                    </div>
-                    <div className="bar"><span style={{ width: `${route.score}%` }} /></div>
-                    <p>{route.note}</p>
+            </div>
+            <label className="dashboard-field">
+              <span>Depart habituel</span>
+              <div className="dashboard-input-shell">
+                <Clock3 size={16} />
+                <input type="time" value={profile.morningDeparture} onChange={(event) => updateField('morningDeparture', event.target.value)} />
+              </div>
+            </label>
+            <label className="dashboard-field">
+              <span>Retour habituel</span>
+              <div className="dashboard-input-shell">
+                <CalendarClock size={16} />
+                <input type="time" value={profile.eveningReturn} onChange={(event) => updateField('eveningReturn', event.target.value)} />
+              </div>
+            </label>
+            <div className="dashboard-field dashboard-field-full">
+              <span>Objectif principal</span>
+              <div className="dashboard-segmented-row">
+                {OBJECTIVE_OPTIONS.map((option) => (
+                  <button key={option.id} type="button" className={`dashboard-segment ${profile.objective === option.id ? 'active' : ''}`} onClick={() => updateField('objective', option.id)}>
+                    {option.label}
                   </button>
                 ))}
               </div>
-            </article>
-            <aside className="card preview-card">
-              <div className="preview-ring">
-                <RouteIcon size={22} />
-                <strong>{selectedRoute?.eta}</strong>
-                <span>{selectedRoute?.label}</span>
+            </div>
+            <div className="dashboard-field dashboard-field-full">
+              <span>Tolerance a la densite</span>
+              <div className="dashboard-segmented-row">
+                {CROWD_TOLERANCE_OPTIONS.map((option) => (
+                  <button key={option.id} type="button" className={`dashboard-segment ${profile.crowdTolerance === option.id ? 'active' : ''}`} onClick={() => updateField('crowdTolerance', option.id)}>
+                    {option.label}
+                  </button>
+                ))}
               </div>
-              <div className="stack compact">
-                <div className="mini-note"><Sparkles size={14} /> Charge estimee {selectedRoute?.crowd}%</div>
-                <div className="mini-note"><TrendingUp size={14} /> {selectedRoute?.note}</div>
-                <div className="mini-note"><ShieldCheck size={14} /> {calmZones[0]?.name || 'Zone calme la plus proche'} comme pause possible</div>
+            </div>
+            <div className="dashboard-field">
+              <span>Notifications</span>
+              <div className="dashboard-toggle-list">
+                {NOTIFICATION_OPTIONS.map((option) => (
+                  <label key={option.id} className="dashboard-toggle">
+                    <input type="checkbox" checked={profile.notifications[option.id]} onChange={() => toggleNestedValue('notifications', option.id)} />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
               </div>
-            </aside>
+            </div>
+            <div className="dashboard-field">
+              <span>Consentements sensibles</span>
+              <div className="dashboard-toggle-list">
+                {CONSENT_OPTIONS.map((option) => (
+                  <label key={option.id} className="dashboard-toggle">
+                    <input type="checkbox" checked={profile.consents[option.id]} onChange={() => toggleNestedValue('consents', option.id)} />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
-        )}
+        </section>
 
-        {view === 'alerts' && (
-          <div className="split two-col">
-            <article className="card">
-              <div className="card-head">
-                <div>
-                  <span className="eyebrow">Flux d alertes</span>
-                  <h2>Signaux a surveiller</h2>
-                </div>
-                <span className="pill">{alerts.length} actives</span>
-              </div>
-              <div className="stack">
-                {alerts.map((alert) => (
-                  <article key={alert.id} className={`alert-card ${alert.tone}`}>
+        <section className="dashboard-panel-card dashboard-map-card">
+          <div className="dashboard-panel-head">
+            <div>
+              <span className="dashboard-eyebrow">Carte centree sur vous</span>
+              <h2>Zone quotidienne et heatmap de densite</h2>
+            </div>
+            <div className="dashboard-moment-switch">
+              {Object.entries(MOMENT_LABELS).map(([momentId, label]) => (
+                <button key={momentId} type="button" className={selectedMoment === momentId ? 'active' : ''} onClick={() => setSelectedMoment(momentId)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="dashboard-map-status">
+            <span><MapPin size={14} /> {zoneLabel}</span>
+            <span><Sparkles size={14} /> {loading ? 'Actualisation en cours' : `Projection pour ${activeTrip?.time || hourText(focusHour)}`}</span>
+            <span><ShieldCheck size={14} /> {sourceDescription || 'Historique + temps reel'}</span>
+          </div>
+          <div className="dashboard-map-stage">
+            <MapComponent route={null} userLocation={userLocation} densityData={densityData} highlightedPoint={mapHighlight} />
+            <div className="dashboard-map-overlay top-left">{loading ? 'Analyse...' : `Meilleur secteur: ${bestSector?.zoneLabel || zoneLabel}`}</div>
+            <div className="dashboard-map-overlay top-right">{pct(activeTrip?.slot?.density || avgDensity)}</div>
+            <div className="dashboard-map-overlay bottom-left">Pic estime vers {hourText(peakSlot?.hour || focusHour)}</div>
+          </div>
+        </section>
+
+        <section className="dashboard-panel-card dashboard-suggestions-card">
+          <div className="dashboard-panel-head">
+            <div>
+              <span className="dashboard-eyebrow">Suggestions intelligentes</span>
+              <h2>Le bon moment pour partir</h2>
+            </div>
+            <span className={`dashboard-panel-pill tone-${mood.tone}`}><BellRing size={14} /> {mood.label}</span>
+          </div>
+          <div className="dashboard-trip-grid">
+            {tripMoments.map((moment) => {
+              const status = densityMeta(moment.slot?.density || 0);
+              return (
+                <article
+                  key={moment.id}
+                  className={`dashboard-trip-card ${selectedMoment === moment.id ? 'active' : ''}`}
+                  onClick={() => setSelectedMoment(moment.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedMoment(moment.id);
+                    }
+                  }}
+                >
+                  <div className="dashboard-trip-top">
                     <div>
-                      <strong>{alert.title}</strong>
-                      <p>{alert.text}</p>
+                      <span>{moment.label}</span>
+                      <strong>{moment.time}</strong>
                     </div>
-                    <button onClick={() => setDismissedAlerts((current) => [...current, alert.id])}>x</button>
-                  </article>
-                ))}
-                {alerts.length === 0 && <div className="empty">Toutes les alertes ont ete masquees.</div>}
-              </div>
-            </article>
-            <aside className="card">
-              <div className="card-head">
-                <div>
-                  <span className="eyebrow">Resume</span>
-                  <h2>Ce que le systeme voit</h2>
-                </div>
-              </div>
-              <div className="stack compact">
-                <div className="mini-note"><BellRing size={14} /> Pic estime vers {hourText(peakSlot?.hour || selectedHour)}</div>
-                <div className="mini-note"><ShieldCheck size={14} /> Secteur le plus calme: {bestSector?.zoneLabel || 'N/A'}</div>
-                <div className="mini-note"><Activity size={14} /> Source: {sourceDescription || 'Historique + temps reel'}</div>
-              </div>
-            </aside>
+                    <small className={`tone-${status.tone}`}>{status.label}</small>
+                  </div>
+                  <div className="dashboard-density-bar">
+                    <span style={{ width: `${Math.round((moment.slot?.density || 0) * 100)}%` }} />
+                  </div>
+                  <p>{moment.recommendation.headline}</p>
+                </article>
+              );
+            })}
           </div>
-        )}
+          <div className="dashboard-recommendation-callout">
+            <strong>{activeTrip?.recommendation?.headline}</strong>
+            <p>{activeTrip?.recommendation?.text}</p>
+          </div>
+          <div className="dashboard-suggestion-list">
+            {smartSuggestions.map((suggestion) => (
+              <article key={suggestion} className="dashboard-note">
+                <Sparkles size={14} />
+                <span>{suggestion}</span>
+              </article>
+            ))}
+          </div>
+        </section>
 
-        {view === 'ai' && (
-          <div className="split two-col">
-            <article className="card assistant-card">
-              <div className="card-head">
-                <div>
-                  <span className="eyebrow">Assistant local</span>
-                  <h2>Dialogue sur les donnees du dashboard</h2>
-                </div>
-                <span className="pill low">Sans API externe</span>
-              </div>
-              <div className="assistant-feed" ref={assistantRef}>
-                {assistantMessages.map((message, index) => (
-                  <div key={`${message.role}-${index}`} className={`bubble ${message.role === 'user' ? 'user' : ''}`}>{message.text}</div>
-                ))}
-                {assistantLoading && <div className="loading-dots"><span /><span /><span /></div>}
-              </div>
-              <div className="assistant-input">
-                <input value={assistantInput} onChange={(event) => setAssistantInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && sendAssistant(assistantInput)} placeholder="Posez une question sur les zones, heures ou trajets..." />
-                <button onClick={() => sendAssistant(assistantInput)} disabled={assistantLoading}>Envoyer</button>
-              </div>
-              <div className="prompts">
-                {QUICK_PROMPTS.map((prompt) => <button key={prompt} onClick={() => sendAssistant(prompt)}>{prompt}</button>)}
-              </div>
-            </article>
-            <aside className="card">
-              <div className="card-head">
-                <div>
-                  <span className="eyebrow">Memo court</span>
-                  <h2>Recommandations instantanees</h2>
-                </div>
-              </div>
-              <div className="stack compact">
-                <div className="mini-note"><ShieldCheck size={14} /> {bestSector ? `${bestSector.zoneLabel} a ${pct(bestSector.density)}` : 'Aucune zone detaillee'}</div>
-                <div className="mini-note"><Clock3 size={14} /> Le meilleur creux se situe vers {hourText(calmSlot?.hour || selectedHour)}</div>
-                <div className="mini-note"><RouteIcon size={14} /> {selectedRoute?.label} reste le meilleur compromis du moment</div>
-              </div>
-            </aside>
+        <section className="dashboard-panel-card dashboard-learning-card">
+          <div className="dashboard-panel-head">
+            <div>
+              <span className="dashboard-eyebrow">Confiance et apprentissage</span>
+              <h2>Ce que SafePath personalise</h2>
+            </div>
+            <span className="dashboard-panel-pill"><SlidersHorizontal size={14} /> Sous votre controle</span>
           </div>
-        )}
-          </section>
-        </main>
+          <div className="dashboard-learning-grid">
+            <article className="dashboard-learning-box">
+              <span>Resume du profil</span>
+              <strong>{objective.label}</strong>
+              <p>
+                Trajet habituel entre {profile.homeLabel || 'votre domicile'} et {profile.workLabel || 'votre lieu frequent'},
+                avec {formatTransportList(profile.transports).toLowerCase()} et une tolerance {crowdTolerance.label.toLowerCase()}.
+              </p>
+            </article>
+            <article className="dashboard-learning-box">
+              <span>Notifications actives</span>
+              <strong>{enabledNotificationCount}/3 canaux</strong>
+              <p>Trafic, horaires et signaux temps reel peuvent vous prevenir si la densite change avant votre depart.</p>
+            </article>
+            <article className="dashboard-learning-box">
+              <span>Donnees sensibles</span>
+              <strong>{enabledConsents}/2 consentements</strong>
+              <p>L historique des deplacements et la geolocalisation en temps reel restent optionnels. Vous choisissez ce qui est active.</p>
+            </article>
+            <article className="dashboard-learning-box">
+              <span>Apprentissage progressif</span>
+              <strong>Personnalisation evolutive</strong>
+              <p>A mesure de vos connexions, SafePath pourra confirmer vos heures habituelles, les modes reels utilises et les trajets frequents.</p>
+            </article>
+          </div>
+        </section>
       </div>
     </div>
   );

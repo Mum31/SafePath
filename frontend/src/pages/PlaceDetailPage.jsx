@@ -25,6 +25,7 @@ import '../App.css';
 import PanoramaModal from '../components/PanoramaModal';
 import StreetViewPanorama from '../components/StreetViewPanorama';
 import { buildForecastTargets } from '../utils/forecast';
+import { DENSITY_GUIDE } from '../utils/densityDisplay';
 import { buildStreetPreviewUrl, hasStreetPreviewProvider } from '../utils/placePreview';
 
 const TABS = [
@@ -45,14 +46,67 @@ const decodeParam = (value, fallback = '') => {
 };
 
 const formatCoordinatesLabel = (lat, lng) => `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`;
+const normalizeLookupText = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 
 const isGenericPlaceLabel = (value) =>
   GENERIC_PLACE_LABELS.has(
-    String(value || '')
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
+    normalizeLookupText(value)
   );
+
+const hasStructuredOpeningHours = (openingHours) =>
+  Boolean(
+    openingHours &&
+      typeof openingHours === 'object' &&
+      ((openingHours.open && openingHours.close) || Object.keys(openingHours).length > 0)
+  );
+
+const formatOpeningHoursLabel = (openingHours) => {
+  if (!hasStructuredOpeningHours(openingHours)) {
+    return null;
+  }
+
+  if (openingHours.open && openingHours.close) {
+    return `${openingHours.open} - ${openingHours.close}`;
+  }
+
+  return Object.entries(openingHours)
+    .filter(([, value]) => Boolean(value))
+    .map(([day, value]) => `${day}: ${value}`)
+    .join(' • ');
+};
+
+function selectMatchingCalmZone(zones, placeName, lat, lng) {
+  if (!Array.isArray(zones) || !zones.length) return null;
+
+  const normalizedPlaceName = normalizeLookupText(placeName);
+  const exactMatch = zones.find((zone) => normalizeLookupText(zone.name) === normalizedPlaceName);
+  if (exactMatch) return exactMatch;
+
+  const fuzzyMatch = zones.find((zone) => {
+    const normalizedZoneName = normalizeLookupText(zone.name);
+    return (
+      normalizedPlaceName &&
+      normalizedZoneName &&
+      (normalizedPlaceName.includes(normalizedZoneName) || normalizedZoneName.includes(normalizedPlaceName))
+    );
+  });
+  if (fuzzyMatch) return fuzzyMatch;
+
+  const veryClose = zones.find((zone) => {
+    const distance = Number(zone?.distance);
+    return Number.isFinite(distance) && distance <= 35;
+  });
+  if (veryClose) return veryClose;
+
+  if (lat == null || lng == null) return null;
+  return null;
+}
 
 function getDensityLabel(percent) {
   if (percent < 35) {
@@ -94,6 +148,45 @@ function getPreviewNote(interactivePreviewStatus, showingStreetPreview) {
   return 'Ajoutez une cle Google Maps pour afficher un panorama 360.';
 }
 
+/**
+ * Carte Leaflet en repli (aperçu). Montage différé + clé stable pour éviter les plantages
+ * React StrictMode / remontages (erreur boundary sur la fiche lieu).
+ */
+function PlaceDetailLeafletFallback({ center, icon }) {
+  const [mapAllowed, setMapAllowed] = useState(false);
+
+  useEffect(() => {
+    setMapAllowed(true);
+    return () => setMapAllowed(false);
+  }, [center[0], center[1]]);
+
+  if (!mapAllowed) {
+    return (
+      <div
+        className="place-detail-leaflet-placeholder"
+        style={{ height: '100%', width: '100%', borderRadius: 8, background: 'var(--color-border, #e2e8f0)' }}
+        aria-hidden
+      />
+    );
+  }
+
+  return (
+    <MapContainer
+      key={`place-fallback-${center[0]}-${center[1]}`}
+      center={center}
+      zoom={15}
+      scrollWheelZoom={false}
+      dragging={false}
+      doubleClickZoom={false}
+      zoomControl={false}
+      style={{ height: '100%', width: '100%', borderRadius: 8 }}
+    >
+      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
+      <Marker position={center} icon={icon} />
+    </MapContainer>
+  );
+}
+
 export default function PlaceDetailPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -122,7 +215,10 @@ export default function PlaceDetailPage() {
   const effectiveLng = hasUrlCoords ? lngNum : (resolvedCoords?.lng ?? null);
   const hasCoords = effectiveLat != null && effectiveLng != null && Number.isFinite(effectiveLat) && Number.isFinite(effectiveLng);
 
-  const previewPosition = hasCoords ? [effectiveLat, effectiveLng] : null;
+  const previewPosition = useMemo(() => {
+    if (!hasCoords || effectiveLat == null || effectiveLng == null) return null;
+    return [effectiveLat, effectiveLng];
+  }, [hasCoords, effectiveLat, effectiveLng]);
 
   const previewIcon = useMemo(
     () =>
@@ -214,8 +310,16 @@ export default function PlaceDetailPage() {
       .then((response) => response.data)
       .catch(() => null);
 
+    const calmZonesPromise = axios
+      .get('/api/calm-zones/', {
+        params: { lat: effectiveLat, lng: effectiveLng, radius: 250 },
+        timeout: 5000,
+      })
+      .then((response) => response.data?.calm_zones || [])
+      .catch(() => []);
+
     try {
-      const [results, reverseData] = await Promise.all([predictionsPromise, reversePromise]);
+      const [results, reverseData, calmZones] = await Promise.all([predictionsPromise, reversePromise, calmZonesPromise]);
       const densityNow = results[0]?.density ?? 0.5;
       const baseName = resolvedMeta?.name || name;
       const resolvedName =
@@ -226,12 +330,16 @@ export default function PlaceDetailPage() {
         resolvedMeta?.address ||
         initialAddress ||
         formatCoordinatesLabel(effectiveLat, effectiveLng);
+      const matchedCalmZone = selectMatchingCalmZone(calmZones, resolvedName, effectiveLat, effectiveLng);
+      const openingHours = matchedCalmZone?.opening_hours || null;
 
       setPlace({
         name: resolvedName,
         address: resolvedAddress,
         lat: effectiveLat,
         lng: effectiveLng,
+        openingHours,
+        matchedCalmZone,
         densityNow,
         predictionsNext6h: results.map((result) => ({
           hour: result.hour,
@@ -247,6 +355,8 @@ export default function PlaceDetailPage() {
         address: resolvedMeta?.address || initialAddress || formatCoordinatesLabel(effectiveLat, effectiveLng),
         lat: effectiveLat,
         lng: effectiveLng,
+        openingHours: null,
+        matchedCalmZone: null,
         densityNow: 0.5,
         predictionsNext6h: forecastTargets.map((target) => ({
           hour: target.hour,
@@ -285,35 +395,36 @@ export default function PlaceDetailPage() {
   const showingStreetPreview = Boolean(streetPreviewUrl) && failedStreetPreviewUrl !== streetPreviewUrl;
   const previewNote = getPreviewNote(mainInteractivePreviewStatus, showingStreetPreview);
 
-  const previewFallback = previewPosition ? (
-    showingStreetPreview ? (
-      <img
-        src={streetPreviewUrl}
-        alt={`Apercu du lieu ${place?.name || name}`}
-        onError={() => setFailedStreetPreviewUrl(streetPreviewUrl)}
-      />
-    ) : (
-      <MapContainer
-        center={previewPosition}
-        zoom={15}
-        scrollWheelZoom={false}
-        dragging={false}
-        doubleClickZoom={false}
-        zoomControl={false}
-        style={{ height: '100%', width: '100%', borderRadius: 8 }}
-      >
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution="&copy; OpenStreetMap"
+  const previewLabel = place?.name || name;
+  const openingHoursLabel = formatOpeningHoursLabel(place?.openingHours);
+  const hasOpeningHours = Boolean(openingHoursLabel);
+  const googleMapsLink =
+    effectiveLat != null && effectiveLng != null
+      ? `https://www.google.com/maps/search/?api=1&query=${effectiveLat},${effectiveLng}`
+      : null;
+  const previewFallback = useMemo(() => {
+    if (!previewPosition) return null;
+    if (showingStreetPreview && streetPreviewUrl) {
+      return (
+        <img
+          src={streetPreviewUrl}
+          alt={`Apercu du lieu ${previewLabel}`}
+          onError={() => setFailedStreetPreviewUrl(streetPreviewUrl)}
         />
-        <Marker position={previewPosition} icon={previewIcon} />
-      </MapContainer>
-    )
-  ) : null;
+      );
+    }
+    return <PlaceDetailLeafletFallback center={previewPosition} icon={previewIcon} />;
+  }, [
+    previewPosition,
+    previewIcon,
+    previewLabel,
+    showingStreetPreview,
+    streetPreviewUrl,
+  ]);
 
   const handleCalculateRoute = () => {
     navigate(
-      `/trajet?arrivee=${encodeURIComponent(place?.name || name)}&lat=${place?.lat}&lng=${place?.lng}`
+      `/trajet?arrivee=${encodeURIComponent(place?.name || name)}&lat=${place?.lat}&lng=${place?.lng}&address=${encodeURIComponent(addressLabel)}`
     );
   };
 
@@ -380,9 +491,23 @@ export default function PlaceDetailPage() {
             {activeTab === 'horaires' && (
               <section id="panel-horaires" role="tabpanel" aria-labelledby="tab-horaires" className="place-detail-panel">
                 <h2 className="place-detail-panel-title">Horaires d'ouverture</h2>
-                <p className="place-detail-placeholder">
-                  Les horaires ne sont pas renseignes pour ce lieu. Consultez le site officiel ou sur place.
-                </p>
+                {hasOpeningHours ? (
+                  <div className="place-detail-info-grid">
+                    <article className="place-detail-info-card">
+                      <span className="place-detail-info-label">Plage principale</span>
+                      <strong>{openingHoursLabel}</strong>
+                      <p>
+                        {place?.matchedCalmZone?.name
+                          ? `Information disponible pour ${place.matchedCalmZone.name}.`
+                          : 'Horaires renseignes pour ce lieu.'}
+                      </p>
+                    </article>
+                  </div>
+                ) : (
+                  <p className="place-detail-placeholder">
+                    Les horaires ne sont pas renseignes pour ce lieu. Consultez le site officiel ou sur place.
+                  </p>
+                )}
               </section>
             )}
 
@@ -415,6 +540,20 @@ export default function PlaceDetailPage() {
                 className="place-detail-panel"
               >
                 <h2 className="place-detail-panel-title">Localisation</h2>
+                <div className="place-detail-info-grid place-detail-info-grid-location">
+                  <article className="place-detail-info-card">
+                    <span className="place-detail-info-label">Adresse</span>
+                    <strong>{addressLabel}</strong>
+                    <p>Repere principal utilise pour cette fiche complete.</p>
+                  </article>
+                  {hasCoords && (
+                    <article className="place-detail-info-card">
+                      <span className="place-detail-info-label">Coordonnees</span>
+                      <strong>{formatCoordinatesLabel(effectiveLat, effectiveLng)}</strong>
+                      <p>Lat/Lng precise du lieu pour la carte et le trajet.</p>
+                    </article>
+                  )}
+                </div>
                 {previewPosition && (
                   <div className="place-detail-map-preview">
                     <StreetViewPanorama
@@ -440,7 +579,22 @@ export default function PlaceDetailPage() {
                     >
                       Voir sur la carte interactive
                     </Link>
+                    {googleMapsLink && (
+                      <a
+                        href={googleMapsLink}
+                        className="place-detail-map-link"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Ouvrir dans Google Maps
+                      </a>
+                    )}
                   </div>
+                )}
+                {!previewPosition && (
+                  <p className="place-detail-placeholder">
+                    Localisation indisponible pour l'instant, mais l'adresse du lieu est bien renseignee ci-dessus.
+                  </p>
                 )}
               </section>
             )}
@@ -460,7 +614,8 @@ export default function PlaceDetailPage() {
           )}
 
           <p className="place-detail-status">
-            <span className="place-detail-status-dot" aria-hidden /> Horaires non renseignes
+            <span className="place-detail-status-dot" aria-hidden />
+            {hasOpeningHours ? `Ouvert : ${openingHoursLabel}` : 'Horaires non renseignes'}
           </p>
 
           <section className="place-detail-sidebar-section">
@@ -472,11 +627,21 @@ export default function PlaceDetailPage() {
                 <Loader2 size={24} className="spin" /> Chargement...
               </div>
             ) : (
-              <div className="place-detail-affluence" style={{ color: densityLabel.color }}>
-                <PersonIcons count={densityLabel.icons} />
-                <span className="place-detail-affluence-label">Affluence</span>
-                <span className="place-detail-affluence-value">{densityLabel.text}</span>
-              </div>
+              <>
+                <div className="place-detail-affluence" style={{ color: densityLabel.color }}>
+                  <PersonIcons count={densityLabel.icons} />
+                  <span className="place-detail-affluence-label">Affluence</span>
+                  <span className="place-detail-affluence-value">{densityLabel.text}</span>
+                </div>
+                <div className="density-guide density-guide-compact">
+                  {DENSITY_GUIDE.map((item) => (
+                    <div key={item.id} className={`density-guide-item tone-${item.tone}`}>
+                      <strong>{item.range}</strong>
+                      <span>{item.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </section>
 

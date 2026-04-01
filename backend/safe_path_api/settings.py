@@ -17,9 +17,9 @@ JWT_ACCESS_TOKEN_LIFETIME_SECONDS = int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME_SEC
 JWT_REFRESH_TOKEN_LIFETIME_SECONDS = int(os.getenv('JWT_REFRESH_TOKEN_LIFETIME_SECONDS', '604800'))
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 # Application definition
 INSTALLED_APPS = [
@@ -66,12 +66,18 @@ TEMPLATES = [
 WSGI_APPLICATION = 'safe_path_api.wsgi.application'
 
 # Database
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',  # <-- SQLite simple
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+db_config = {
+    'ENGINE': os.getenv('DB_ENGINE', 'django.db.backends.sqlite3'),
+    'NAME': str(os.getenv('DB_NAME', BASE_DIR / 'db.sqlite3')),
 }
+if db_config['ENGINE'] != 'django.db.backends.sqlite3':
+    db_config.update({
+        'USER': os.getenv('DB_USER'),
+        'PASSWORD': os.getenv('DB_PASSWORD'),
+        'HOST': os.getenv('DB_HOST'),
+        'PORT': os.getenv('DB_PORT', '5432'),
+    })
+DATABASES = {'default': db_config}
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -102,10 +108,7 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173').split(',')
 
 # REST Framework
 REST_FRAMEWORK = {

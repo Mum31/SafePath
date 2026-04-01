@@ -128,6 +128,30 @@ class DensityPredictionViewTests(TestCase):
         unique_densities = {prediction['density'] for prediction in predictions}
         self.assertGreater(len(unique_densities), 1)
 
+    def test_historical_profile_uses_low_night_fallback_for_missing_hours(self):
+        from ml_model.predict import predict_density
+
+        target_datetime = datetime(2026, 3, 30, 1, 0, 0)
+        prediction = predict_density(48.85837, 2.29448, target_datetime, skip_realtime=True)
+
+        self.assertLess(prediction['density'], 0.3)
+        self.assertLess(prediction['historical_base'], 0.3)
+
+    @patch('api.utils.data_aggregator.DataAggregator.get_aggregated_density_for_point')
+    def test_low_confidence_realtime_signal_is_not_blended(self, mock_get_aggregated_density):
+        from ml_model.predict import predict_density
+
+        target_datetime = datetime.now().replace(hour=1, minute=0, second=0, microsecond=0)
+        mock_get_aggregated_density.return_value = {
+            'density': 0.95,
+            'confidence': 0.1,
+        }
+
+        prediction = predict_density(48.85837, 2.29448, target_datetime)
+
+        self.assertEqual(prediction['model_type'], 'predictive')
+        self.assertLess(prediction['density'], 0.3)
+
 
 class IDFMNavitiaClientTests(TestCase):
     @patch('api.utils.idfm_navitia.geocode_search')

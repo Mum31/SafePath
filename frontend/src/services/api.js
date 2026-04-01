@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '/api' : '');
 const ACCESS_TOKEN_KEY = 'safepath.auth.access';
 const REFRESH_TOKEN_KEY = 'safepath.auth.refresh';
 

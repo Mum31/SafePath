@@ -1,10 +1,10 @@
-# 🛡️ SafePath – Planificateur de trajets sécurisés à Paris
+#  SafePath – Planificateur de trajets sécurisés à Paris
 
 > Une application web intelligente permettant de trouver l'itinéraire le plus sûr à Paris en combinant les données de transport, la cartographie interactive et un modèle de Machine Learning d'analyse des zones à risque.
 
 ---
 
-# 📸 Aperçu de l'application
+#  Aperçu de l'application
 
 ## Accueil
 
@@ -61,21 +61,21 @@ https://votre-lien-de-demo
 
 ---
 
-# ✨ Fonctionnalités
+#  Fonctionnalités
 
-- 🛡️ Calcul d'itinéraires sécurisés
-- 🤖 Analyse des zones sensibles grâce au Machine Learning
-- 🚇 Intégration des transports publics (IDFM / Navitia)
-- 🗺️ Cartographie interactive avec Leaflet & Mapbox
-- 📊 Tableau de bord statistique
-- 💬 Assistant conversationnel IA
-- 📍 Recherche d'adresses
-- ⚡ Temps de calcul optimisé
-- 📱 Interface responsive
+-  Calcul d'itinéraires sécurisés
+-  Analyse des zones sensibles grâce au Machine Learning
+-  Intégration des transports publics (IDFM / Navitia)
+-  Cartographie interactive avec Leaflet & Mapbox
+-  Tableau de bord statistique
+-  Assistant conversationnel IA
+-  Recherche d'adresses
+-  Temps de calcul optimisé
+-  Interface responsive
 
 ---
 
-# 🏗️ Architecture
+#  Architecture
 
 ```
 React + Vite
@@ -95,7 +95,7 @@ Cartographie Leaflet + Mapbox
 
 ---
 
-# 🛠️ Technologies utilisées
+#  Technologies utilisées
 
 ## Frontend
 
@@ -119,7 +119,7 @@ Cartographie Leaflet + Mapbox
 
 ---
 
-# 🚀 Déploiement
+#  Déploiement
 
 ## Frontend (Vercel)
 
@@ -167,7 +167,7 @@ Puis lancer le déploiement.
 
 ---
 
-# 💻 Installation locale
+#  Installation locale
 
 ```bash
 git clone https://github.com/votre-repo/SafePath.git
@@ -191,7 +191,7 @@ http://localhost:8000/api/
 
 ---
 
-# 📂 Structure du projet
+# Structure du projet
 
 ```
 SafePath
@@ -213,7 +213,7 @@ SafePath
 
 ---
 
-# 📈 Perspectives
+#  Perspectives
 
 - Authentification des utilisateurs
 - Historique des trajets
@@ -221,12 +221,3 @@ SafePath
 - Détection automatique d'incidents
 - Application mobile
 
----
-
-# 👨‍💻 Auteur
-
-**Daniola Datang**
-
-Étudiante en Intelligence Artificielle • Data • Business Intelligence
-
-⭐ N'hésitez pas à laisser une étoile si le projet vous plaît !

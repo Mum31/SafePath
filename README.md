@@ -1,51 +1,232 @@
-# SafePath - Planificateur de trajets sécurisés à Paris
+# 🛡️ SafePath – Planificateur de trajets sécurisés à Paris
 
-[![Vercel](https://theregister.s3.amazonaws.com/prod/archive/2022/10/vercel_logo.png)](https://vercel.com/new/git/external) [![Render](https://render.com/images/deploy-to-render.svg)](https://render.com/deploy-docker?repo=https://github.com/YOURUSERNAME/SafePath)
+> Une application web intelligente permettant de trouver l'itinéraire le plus sûr à Paris en combinant les données de transport, la cartographie interactive et un modèle de Machine Learning d'analyse des zones à risque.
 
-## 🚀 Déploiement Gratuit (Frontend Vercel + Backend Render)
+---
 
-### 1. Pousser sur GitHub
+# 📸 Aperçu de l'application
+
+## Accueil
+
+![Page d'accueil — hero et recherche](frontend/src/assets/brands/S1.png)
+
+![Notre sélection — lieux en direct](frontend/src/assets/brands/S2.png)
+
+![Catégories d'établissements](frontend/src/assets/brands/S3.png)
+
+![Comment ça marche](frontend/src/assets/brands/S4.png)
+
+---
+
+## Carte interactive
+
+![Exploration — carte et densité](frontend/src/assets/brands/S6.png)
+
+![Fiche lieu — détail et affluence](frontend/src/assets/brands/S12.png)
+
+---
+
+## Calcul d'itinéraire
+
+![Formulaire de trajet](frontend/src/assets/brands/S8.png)
+
+![Modes et alternatives](frontend/src/assets/brands/S9.png)
+
+![Étapes et transports](frontend/src/assets/brands/S10.png)
+
+---
+
+## Tableau de bord
+
+![Dashboard personnalisé](frontend/src/assets/brands/S14.png)
+
+---
+
+## Chatbot IA
+
+![Assistant SafePath](frontend/src/assets/brands/S15.png)
+
+---
+
+# 🎥 Démonstration
+
+La vidéo de démo est trop volumineuse pour GitHub (> 100 Mo).  
+Hébergez-la sur **YouTube**, **Google Drive** ou **Streamable**, puis ajoutez le lien ici :
+
+```
+https://votre-lien-de-demo
+```
+
+> Fichier local (non versionné) : `frontend/src/assets/brands/demo2.mp4`
+
+---
+
+# ✨ Fonctionnalités
+
+- 🛡️ Calcul d'itinéraires sécurisés
+- 🤖 Analyse des zones sensibles grâce au Machine Learning
+- 🚇 Intégration des transports publics (IDFM / Navitia)
+- 🗺️ Cartographie interactive avec Leaflet & Mapbox
+- 📊 Tableau de bord statistique
+- 💬 Assistant conversationnel IA
+- 📍 Recherche d'adresses
+- ⚡ Temps de calcul optimisé
+- 📱 Interface responsive
+
+---
+
+# 🏗️ Architecture
+
+```
+React + Vite
+        │
+        ▼
+ Django REST API
+        │
+        ▼
+PostgreSQL + PostGIS
+        │
+        ▼
+ Machine Learning
+        │
+        ▼
+Cartographie Leaflet + Mapbox
+```
+
+---
+
+# 🛠️ Technologies utilisées
+
+## Frontend
+
+- React
+- Vite
+- Leaflet
+- Mapbox
+- Recharts
+- Axios
+
+## Backend
+
+- Django
+- Django REST Framework
+- PostgreSQL
+- PostGIS
+- Redis
+- Pandas
+- NumPy
+- Scikit-Learn
+
+---
+
+# 🚀 Déploiement
+
+## Frontend (Vercel)
+
 ```bash
-git add .
-git commit -m \"Deploy ready\"
 git push origin main
 ```
 
-### 2. Frontend (Vercel - Static React)
-- Allez sur [vercel.com](https://vercel.com) → New Project → Import repo GitHub
-- Ajoutez env: `VITE_MAPBOX_TOKEN=pk...` (obtenez sur mapbox.com)
-- Déployé! URL: https://safepath.vercel.app
+Ajouter les variables :
 
-### 3. Backend (Render - Docker Django/Postgres)
-- [render.com](https://render.com) → New → Web Service → Docker → GitHub repo
-- Env vars (de .env.example):
-  - `SECRET_KEY=...` (générer nouveau)
-  - `DEBUG=False`
-  - `DB_NAME=... DB_HOST=...` (créer Postgres gratuit sur Render)
-  - `REDIS_URL=...` (Redis gratuit Render)
-  - `ALLOWED_HOSTS=*`
-- Build Command: auto (Dockerfile)
-- URL: https://safepath-api.onrender.com/api/
-
-### 4. Connecter
-- Redeploy Vercel avec `VITE_API_URL=https://safepath-api.onrender.com/api`
-
-### Local Dev
-```bash
-docker-compose up --build
-Frontend: http://localhost:5173
-Backend: http://localhost:8000/api/
+```
+VITE_MAPBOX_TOKEN=...
+VITE_API_URL=https://safepath-api.onrender.com/api
 ```
 
-## Fonctionnalités
-- Trajets sécurisés (densité ML)
-- Transports IDFM/Navitia
-- Maps Leaflet/Mapbox
-- Chatbot IA
+Déployer sur **Vercel**.
 
-## Stack
-- Frontend: React/Vite/Leaflet/Recharts
-- Backend: Django/DRF/PostGIS/Redis/Pandas/scikit-learn
-- DB: Postgres/PostGIS
+---
 
-Fork & star! 🌟
+## Backend (Render)
+
+Créer un Web Service Docker.
+
+Variables :
+
+```
+SECRET_KEY=
+DEBUG=False
+
+DB_NAME=
+DB_HOST=
+DB_USER=
+DB_PASSWORD=
+
+REDIS_URL=
+
+ALLOWED_HOSTS=*
+```
+
+Créer ensuite :
+
+- PostgreSQL
+- Redis
+
+Puis lancer le déploiement.
+
+---
+
+# 💻 Installation locale
+
+```bash
+git clone https://github.com/votre-repo/SafePath.git
+
+cd SafePath
+
+docker-compose up --build
+```
+
+Frontend
+
+```
+http://localhost:5173
+```
+
+Backend
+
+```
+http://localhost:8000/api/
+```
+
+---
+
+# 📂 Structure du projet
+
+```
+SafePath
+│
+├── frontend
+│   ├── src
+│   │   └── assets/brands
+│   │       ├── S1.png … S15.png   # captures d'écran (README)
+│   │       └── demo2.mp4          # démo locale (hors Git, > 100 Mo)
+│   └── public
+│
+├── backend
+│   ├── api
+│   ├── ml_model
+│   └── Dockerfile
+│
+└── docker-compose.yml
+```
+
+---
+
+# 📈 Perspectives
+
+- Authentification des utilisateurs
+- Historique des trajets
+- Notifications en temps réel
+- Détection automatique d'incidents
+- Application mobile
+
+---
+
+# 👨‍💻 Auteur
+
+**Daniola Datang**
+
+Étudiante en Intelligence Artificielle • Data • Business Intelligence
+
+⭐ N'hésitez pas à laisser une étoile si le projet vous plaît !
